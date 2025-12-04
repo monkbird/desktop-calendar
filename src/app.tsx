@@ -2,7 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Calendar as CalendarIcon, RotateCcw, Lock, Unlock, Minus, Square, ChevronLeft, ChevronRight, X, Check, Trash2 } from 'lucide-react';
 import type { Todo, WindowState, HoverState } from './types';
-import { CHINESE_NUMS, SOLAR_TERMS, getDaysInMonth, getFirstDayOfMonth, formatDateKey, getLunarText } from './utils';
+import { 
+  CHINESE_NUMS, 
+  getDaysInMonth, 
+  getFirstDayOfMonth, 
+  formatDateKey, 
+  getDateInfo // 引入新的获取日期信息的函数
+} from './utils';
 import { InteractiveTooltip } from './components/InteractiveTooltip';
 import { CalendarCell } from './components/CalendarCell';
 
@@ -166,7 +172,12 @@ export default function App() {
     const d = new Date(year, month, i);
     const dateKey = formatDateKey(d);
     const isToday = dateKey === todayKey;
-    const term = SOLAR_TERMS[`${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`];
+
+    // --- 使用新的 getDateInfo 获取精准农历与节日 ---
+    const { lunarText, term, festival } = getDateInfo(d);
+    
+    // 如果有节日或节气，优先显示（UI上高亮）
+    const highlightText = festival || term; 
     
     calendarCells.push(
       <CalendarCell 
@@ -175,8 +186,8 @@ export default function App() {
         dateKey={dateKey}
         isToday={isToday}
         tasks={getTasksForDate(dateKey)}
-        term={term}
-        lunar={getLunarText(i, month)}
+        term={highlightText}
+        lunar={lunarText}
         isMiniMode={isMiniMode}
         onMouseEnter={handleMouseEnterCell}
         onMouseLeave={handleMouseLeaveAnywhere}
@@ -230,7 +241,12 @@ export default function App() {
                <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
              </h2>
              <div className="flex gap-1">
-               <button onClick={() => { setCurrentDate(new Date()); setSelectedDateKey(todayKey); }} className="p-1 hover:bg-white/10 rounded text-emerald-400" title="回到今天">
+               {/* --- 这里的按钮事件已修改：移除 setSelectedDateKey --- */}
+               <button 
+                 onClick={() => setCurrentDate(new Date())} 
+                 className="p-1 hover:bg-white/10 rounded text-emerald-400" 
+                 title="回到今天"
+               >
                  <RotateCcw size={14} />
                </button>
                <div className="flex bg-white/5 rounded">
@@ -262,7 +278,7 @@ export default function App() {
           )}
         </div>
 
-        {/* --- 保留的双击详情弹窗 (可选) --- */}
+        {/* --- 保留的双击详情弹窗 --- */}
         {selectedDateKey && !isCollapsed && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
              <div className="w-full max-w-[320px] bg-[#25262b] border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
