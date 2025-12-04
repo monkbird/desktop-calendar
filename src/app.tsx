@@ -40,6 +40,29 @@ export default function App() {
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // --- 新增：跨夜自动刷新逻辑 ---
+  // 用于支持长期运行，确保午夜过后"今天"的状态能自动更新
+  const [nowDate, setNowDate] = useState(new Date());
+
+  useEffect(() => {
+    // 计算距离下一个午夜还有多少毫秒
+    const now = new Date();
+    const night = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1, // 明天
+      0, 0, 0 // 0点0分0秒
+    );
+    const msToMidnight = night.getTime() - now.getTime();
+
+    // 设置一个定时器，在午夜时刻触发刷新
+    const timer = setTimeout(() => {
+      setNowDate(new Date()); // 触发重绘，更新 nowDate
+    }, msToMidnight + 1000); // 加1秒缓冲，确保确实过了午夜
+
+    return () => clearTimeout(timer);
+  }, [nowDate]); // 依赖 nowDate 变化来重置下一轮定时器
+
   // --- 持久化 ---
   useEffect(() => {
     localStorage.setItem('desktop-todos-v8', JSON.stringify(todos));
@@ -122,7 +145,8 @@ export default function App() {
   };
 
   // --- 待办逻辑 ---
-  const today = new Date();
+  // 修改：使用状态驱动的 nowDate 代替静态的 new Date()
+  const today = nowDate;
   const todayKey = formatDateKey(today);
 
   const getTasksForDate = (dateKey: string) => {
