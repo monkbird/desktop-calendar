@@ -1,4 +1,4 @@
-import { Solar, Lunar } from 'lunar-typescript';
+import { Solar, Lunar, HolidayUtil } from 'lunar-typescript'; // 新增 HolidayUtil
 
 export const CHINESE_NUMS = ['日', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 
@@ -10,15 +10,19 @@ export const formatDateKey = (date: Date) => {
 };
 
 export interface DateInfo {
-  lunarText: string; // 简写（用于日历格子，如“初九”）
-  term: string;      // 节气
-  festival: string;  // 节日
-  fullLunar: string; // 完整农历（用于悬浮窗，如“十月初九”）
+  lunarText: string;
+  term: string;
+  festival: string;
+  fullLunar: string;
+  workStatus: 'rest' | 'work' | null; // 新增字段：rest=休, work=班, null=无
 }
 
 export const getDateInfo = (date: Date): DateInfo => {
   const solar = Solar.fromDate(date);
   const lunar = solar.getLunar();
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
 
   const term = lunar.getJieQi();
 
@@ -37,13 +41,22 @@ export const getDateInfo = (date: Date): DateInfo => {
     lunarText = lunar.getMonthInChinese() + '月';
   }
 
-  // 拼接完整农历字符串，例如：十月 + 初九 = 十月初九
   const fullLunar = lunar.getMonthInChinese() + '月' + lunar.getDayInChinese();
+
+  // --- 新增：获取节假日调休信息 ---
+  const holiday = HolidayUtil.getHoliday(y, m, d);
+  let workStatus: 'rest' | 'work' | null = null;
+  
+  if (holiday) {
+    // isWork() 为 true 表示调休上班（班），false 表示放假（休）
+    workStatus = holiday.isWork() ? 'work' : 'rest';
+  }
 
   return {
     lunarText,
     term,
     festival,
-    fullLunar // 返回新增的字段
+    fullLunar,
+    workStatus // 返回状态
   };
 };

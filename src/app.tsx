@@ -1,21 +1,38 @@
 import { useState, useEffect, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { Calendar as CalendarIcon, RotateCcw, Lock, Unlock, Minus, Square, ChevronLeft, ChevronRight, X, Check, Trash2 } from 'lucide-react';
+import { 
+  Calendar as CalendarIcon, 
+  RotateCcw, 
+  Lock, 
+  Unlock, 
+  Minus, 
+  Square, 
+  ChevronLeft, 
+  ChevronRight, 
+  X, 
+  Check, 
+  Trash2,
+  History // 新增图标
+} from 'lucide-react';
 import type { Todo, WindowState, HoverState } from './types';
 import { 
   CHINESE_NUMS, 
   getDaysInMonth, 
   getFirstDayOfMonth, 
   formatDateKey, 
-  getDateInfo // 引入新的获取日期信息的函数
+  getDateInfo 
 } from './utils';
 import { InteractiveTooltip } from './components/InteractiveTooltip';
 import { CalendarCell } from './components/CalendarCell';
+import { HistoryModal } from './components/HistoryModal'; // 新增组件引用
 
 export default function App() {
   // --- 状态管理 ---
   const [isLocked, setIsLocked] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // 新增：历史窗口状态
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
+
   const [winState, setWinState] = useState<WindowState>({ x: 50, y: 50, width: 800, height: 550 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -41,27 +58,24 @@ export default function App() {
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- 新增：跨夜自动刷新逻辑 ---
-  // 用于支持长期运行，确保午夜过后"今天"的状态能自动更新
   const [nowDate, setNowDate] = useState(new Date());
 
   useEffect(() => {
-    // 计算距离下一个午夜还有多少毫秒
     const now = new Date();
     const night = new Date(
       now.getFullYear(),
       now.getMonth(),
-      now.getDate() + 1, // 明天
-      0, 0, 0 // 0点0分0秒
+      now.getDate() + 1, 
+      0, 0, 0 
     );
     const msToMidnight = night.getTime() - now.getTime();
 
-    // 设置一个定时器，在午夜时刻触发刷新
     const timer = setTimeout(() => {
-      setNowDate(new Date()); // 触发重绘，更新 nowDate
-    }, msToMidnight + 1000); // 加1秒缓冲，确保确实过了午夜
+      setNowDate(new Date()); 
+    }, msToMidnight + 1000); 
 
     return () => clearTimeout(timer);
-  }, [nowDate]); // 依赖 nowDate 变化来重置下一轮定时器
+  }, [nowDate]); 
 
   // --- 持久化 ---
   useEffect(() => {
@@ -145,7 +159,6 @@ export default function App() {
   };
 
   // --- 待办逻辑 ---
-  // 修改：使用状态驱动的 nowDate 代替静态的 new Date()
   const today = nowDate;
   const todayKey = formatDateKey(today);
 
@@ -157,7 +170,6 @@ export default function App() {
       if (dateKey > todayKey) return todo.targetDate === dateKey;
       return false; 
     }).sort((a, b) => {
-      // 排序：未完成在前
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
       return 0;
     });
@@ -169,8 +181,23 @@ export default function App() {
     setTodos([...todos, newTodo]);
   };
 
-  const handleToggleTodo = (id: string) => {
-    setTodos(todos.map(todo => todo.id === id ? { ...todo, completed: !todo.completed } : todo));
+const handleToggleTodo = (id: string) => {
+    setTodos(todos.map(todo => {
+      if (todo.id === id) {
+        const isNowCompleted = !todo.completed;
+        let newDate = todo.targetDate;
+
+        // 关键逻辑：
+        // 如果是执行“完成”操作，且该任务原本的日期早于今天（是延期下来的旧任务），
+        // 那么将其日期更新为“今天”，这样它就会乖乖留在今天的格子里（如截图效果）。
+        if (isNowCompleted && todo.targetDate < todayKey) {
+            newDate = todayKey;
+        }
+        
+        return { ...todo, completed: isNowCompleted, targetDate: newDate };
+      }
+      return todo;
+    }));
   };
 
   const handleDeleteTodo = (id: string) => {
@@ -197,10 +224,8 @@ export default function App() {
     const dateKey = formatDateKey(d);
     const isToday = dateKey === todayKey;
 
-    // --- 使用新的 getDateInfo 获取精准农历与节日 ---
-    const { lunarText, term, festival } = getDateInfo(d);
+    const { lunarText, term, festival, workStatus } = getDateInfo(d);
     
-    // 如果有节日或节气，优先显示（UI上高亮）
     const highlightText = festival || term; 
     
     calendarCells.push(
@@ -212,6 +237,7 @@ export default function App() {
         tasks={getTasksForDate(dateKey)}
         term={highlightText}
         lunar={lunarText}
+        workStatus={workStatus}
         isMiniMode={isMiniMode}
         onMouseEnter={handleMouseEnterCell}
         onMouseLeave={handleMouseLeaveAnywhere}
@@ -249,6 +275,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1">
+             {/* 新增：历史清单按钮 */}
+            <button 
+              onClick={() => setIsHistoryOpen(true)} 
+              className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors"
+              title="历史清单"
+            >
+              <History size={14} />
+            </button>
+
+            <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
+
             <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400'}`}>
               {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
             </button>
@@ -265,7 +302,6 @@ export default function App() {
                <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
              </h2>
              <div className="flex gap-1">
-               {/* --- 这里的按钮事件已修改：移除 setSelectedDateKey --- */}
                <button 
                  onClick={() => setCurrentDate(new Date())} 
                  className="p-1 hover:bg-white/10 rounded text-emerald-400" 
@@ -343,6 +379,15 @@ export default function App() {
         onToggleTodo={handleToggleTodo}
         onDeleteTodo={handleDeleteTodo}
         onUpdateTodoText={handleUpdateTodoText}
+      />
+
+      {/* --- 新增：历史清单弹窗 --- */}
+      <HistoryModal 
+        isOpen={isHistoryOpen} 
+        onClose={() => setIsHistoryOpen(false)}
+        todos={todos}
+        onToggleTodo={handleToggleTodo}
+        onDeleteTodo={handleDeleteTodo}
       />
     </div>
   );
