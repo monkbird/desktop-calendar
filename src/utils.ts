@@ -1,4 +1,4 @@
-import { Solar, Lunar, HolidayUtil } from 'lunar-typescript'; // 新增 HolidayUtil
+import { Solar, HolidayUtil } from 'lunar-typescript'; // 新增 HolidayUtil
 
 export const CHINESE_NUMS = ['日', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 

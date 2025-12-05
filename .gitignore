@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.cache/
+release/
 .DS_Store
 *.log
 *.tmp
