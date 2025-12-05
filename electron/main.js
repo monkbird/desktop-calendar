@@ -5,6 +5,9 @@ import AutoLaunch from 'auto-launch'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// --- 优化 1: 禁用硬件加速 (必须在 app.whenReady 之前调用) ---
+app.disableHardwareAcceleration();
+
 let mainWindow
 
 const createWindow = () => {
@@ -15,22 +18,104 @@ const createWindow = () => {
     minHeight: 300,
     frame: false,       // 无边框
     transparent: true,  // 透明背景
-    alwaysOnTop: true,  // 永远置顶
+    alwaysOnTop: false,  // 永远置顶
     hasShadow: false,   // 去掉系统阴影（由 CSS 控制更好看）
     resizable: true,    // 允许调整大小
-    skipTaskbar: false, // 是否在任务栏显示
+    skipTaskbar: true, // 是否在任务栏显示
     backgroundColor: '#00000000', // 关键：背景完全透明
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // --- 优化 2: 内存优化配置 ---
+      spellcheck: false, // 禁用拼写检查，省内存
+      devTools: false // 生产环境禁用 DevTools (构建后生效)
     }
   })
 
   const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
   mainWindow.loadFile(indexPath)
+// 【修改点1】添加边缘吸附逻辑
+  mainWindow.on('move', () => {
+    // 获取当前窗口位置和大小
+    const bounds = mainWindow.getBounds()
+    const { x, y, width, height } = bounds
+    
+    // 获取当前窗口所在的屏幕信息（支持多显示器）
+    const { workArea } = screen.getDisplayMatching(bounds)
+    
+    // 吸附阈值（像素）
+    const threshold = 20
+    
+    let newX = x
+    let newY = y
+    
+    // 左边缘吸附
+    if (Math.abs(x - workArea.x) < threshold) {
+      newX = workArea.x
+    } 
+    // 右边缘吸附
+    else if (Math.abs(workArea.x + workArea.width - (x + width)) < threshold) {
+      newX = workArea.x + workArea.width - width
+    }
+    
+    // 上边缘吸附
+    if (Math.abs(y - workArea.y) < threshold) {
+      newY = workArea.y
+    } 
+    // 下边缘吸附
+    else if (Math.abs(workArea.y + workArea.height - (y + height)) < threshold) {
+      newY = workArea.y + workArea.height - height
+    }
+    
+    // 如果位置发生变化，应用吸附
+    if (newX !== x || newY !== y) {
+      mainWindow.setPosition(newX, newY)
+    }
+  })
 }
+// 【新增】创建系统托盘
+const createTray = () => {
+  // 这里暂时使用构建后的 public 目录下的图标，建议换成专门的 tray icon (ico/png)
+  // 注意：生产环境和开发环境路径可能不同，建议准备一个 icon.png 放在 public 目录
+  const iconPath = path.join(__dirname, '..', 'dist', 'vite.svg') 
+  const icon = nativeImage.createFromPath(iconPath)
+  
+  tray = new Tray(icon)
+  tray.setToolTip('Desktop Calendar')
 
+  // 托盘右键菜单
+  const contextMenu = Menu.buildFromTemplate([
+    { 
+      label: '显示/隐藏', 
+      click: () => {
+        if (mainWindow.isVisible()) {
+          mainWindow.hide()
+        } else {
+          mainWindow.show()
+        }
+      } 
+    },
+    { type: 'separator' },
+    { 
+      label: '退出', 
+      click: () => {
+        app.quit()
+      } 
+    }
+  ])
+
+  tray.setContextMenu(contextMenu)
+
+  // 点击托盘图标切换窗口显示状态
+  tray.on('click', () => {
+    if (mainWindow.isVisible()) {
+      mainWindow.hide()
+    } else {
+      mainWindow.show()
+    }
+  })
+}
 // 监听前端发来的“调整窗口大小”指令
 ipcMain.on('resize-window', (event, { width, height }) => {
   const win = BrowserWindow.fromWebContents(event.sender)
@@ -59,6 +144,7 @@ app.whenReady().then(async () => {
     return
   }
   createWindow()
+  createTray() // 【新增】初始化托盘
   await enableAutoLaunch()
 
   app.on('activate', () => {
