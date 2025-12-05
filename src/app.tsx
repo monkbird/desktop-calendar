@@ -54,6 +54,10 @@ export default function App() {
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowDate, setNowDate] = useState(new Date());
 
+  // --- 详细编辑模式的状态 ---
+  const [modalEditingId, setModalEditingId] = useState<string | null>(null);
+  const [modalEditText, setModalEditText] = useState('');
+
   // --- 窗口大小同步逻辑 ---
   useEffect(() => {
     setWinSize({ width: window.innerWidth, height: window.innerHeight });
@@ -116,34 +120,49 @@ export default function App() {
     setIsResizing(true);
   };
 
+  const today = nowDate;
+  const todayKey = formatDateKey(today);
+  
+  const getTasksForDate = (dateKey: string) => {
+    const isToday = dateKey === todayKey;
+    return todos.filter(todo => {
+      if (todo.completed) return todo.targetDate === dateKey;
+      if (isToday) return todo.targetDate <= dateKey;
+      if (dateKey > todayKey) return todo.targetDate === dateKey;
+      return false; 
+    }).sort((a, b) => {
+      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      return 0;
+    });
+  };
+
   // --- 关键修复：弹窗定位逻辑 (Smart Clamping) ---
   const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     if (isResizing) return;
 
+    const tasks = getTasksForDate(dateKey);
+    if (tasks.length === 0) {
+      setHoverState(null);
+      setHoverRect(null);
+      return;
+    }
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setHoverRect(rect);
-    // 弹窗尺寸预估 (宽240，高200)
     const tooltipW = 240; 
     const tooltipH = 220; 
     const gap = 5;
 
-    // 1. 尝试放在右侧
     let x = rect.right + gap;
-    
-    // 2. 如果右侧超出窗口，改为放在左侧
     if (x + tooltipW > winSize.width) {
         x = rect.left - tooltipW - gap;
     }
-
-    // 3. 如果左侧也变成了负数（窗口极窄），强制“贴右边”显示
     if (x < 0) {
         x = winSize.width - tooltipW - gap;
-        // 极限修正：不能小于0
         if (x < 0) x = 0; 
     }
 
-    // 4. 垂直方向处理：尽量放上面，放不下放下面，再不行贴底
     let y = rect.top;
     if (y + tooltipH > winSize.height) {
         y = winSize.height - tooltipH - gap;
@@ -167,20 +186,6 @@ export default function App() {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
   };
 
-  const today = nowDate;
-  const todayKey = formatDateKey(today);
-  const getTasksForDate = (dateKey: string) => {
-    const isToday = dateKey === todayKey;
-    return todos.filter(todo => {
-      if (todo.completed) return todo.targetDate === dateKey;
-      if (isToday) return todo.targetDate <= dateKey;
-      if (dateKey > todayKey) return todo.targetDate === dateKey;
-      return false; 
-    }).sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1;
-      return 0;
-    });
-  };
   const handleAddTodo = (text: string, dateKey: string) => {
     if (!text.trim()) return;
     const newTodo: Todo = { id: crypto.randomUUID(), text, completed: false, targetDate: dateKey };
@@ -201,6 +206,20 @@ export default function App() {
   const handleUpdateTodoText = (id: string, newText: string) => {
     if (!newText.trim()) return;
     setTodos(todos.map(t => t.id === id ? { ...t, text: newText } : t));
+  };
+
+  const startModalEdit = (task: Todo) => {
+    if (!task.completed) {
+      setModalEditingId(task.id);
+      setModalEditText(task.text);
+    }
+  };
+
+  const finishModalEdit = () => {
+    if (modalEditingId) {
+      handleUpdateTodoText(modalEditingId, modalEditText);
+      setModalEditingId(null);
+    }
   };
 
   const isMiniMode = winSize.width < 500 || winSize.height < 450;
@@ -241,14 +260,16 @@ export default function App() {
   return (
     <div className="w-full h-full flex flex-col overflow-hidden bg-transparent select-none">
       
+      {/* 修改点：背景改为更透明的 bg-black/30 (原为 bg-[#1a1b1e]/95) */}
       <div 
-        className={`flex-1 flex flex-col bg-[#1a1b1e]/95 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-opacity duration-300
+        className={`flex-1 flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-opacity duration-300
           ${isLocked ? 'border-red-500/30' : 'border-white/10'}
         `}
       >
         {/* --- 标题栏 --- */}
+        {/* 修改点：标题栏背景改为 bg-white/5 (原为 bg-[#202124]/80) */}
         <div 
-          className={`h-12 flex items-center justify-between px-3 border-b border-white/10 bg-[#202124]/80 flex-shrink-0
+          className={`h-12 flex items-center justify-between px-3 border-b border-white/10 bg-white/5 flex-shrink-0
             ${isLocked ? '' : 'drag-region'}
           `}
         >
@@ -278,7 +299,8 @@ export default function App() {
 
         {/* --- 主体内容 --- */}
         <div className={`flex-1 flex flex-col min-h-0 relative ${isCollapsed ? 'hidden' : 'block'}`}>
-          <div className="flex items-center justify-between px-4 py-2 bg-[#202124]/30 flex-shrink-0">
+          {/* 修改点：控制栏背景更透明 bg-white/5 */}
+          <div className="flex items-center justify-between px-4 py-2 bg-white/5 flex-shrink-0">
              <h2 className="text-lg font-light text-white flex items-end gap-1">
                <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
              </h2>
@@ -291,13 +313,15 @@ export default function App() {
              </div>
           </div>
 
+          {/* 修改点：星期栏背景改为透明 bg-transparent 或 bg-black/10 */}
           <div className="grid grid-cols-7 border-b border-white/5 bg-black/10 flex-shrink-0">
             {CHINESE_NUMS.slice(0, 7).map((d,i)=>(
               <div key={i} className="text-[10px] text-slate-500 py-1 text-center">{d}</div>
             ))}
           </div>
 
-          <div className="flex-1 grid grid-cols-7 auto-rows-fr overflow-hidden bg-[#1a1b1e]">
+          {/* 修改点：日历网格背景改为 bg-transparent (原为 bg-[#1a1b1e]) */}
+          <div className="flex-1 grid grid-cols-7 auto-rows-fr overflow-hidden bg-transparent">
             {calendarCells}
           </div>
 
@@ -316,7 +340,8 @@ export default function App() {
         {/* --- 双击详情弹窗 --- */}
         {selectedDateKey && !isCollapsed && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-             <div className="w-full max-w-[320px] bg-[#25262b] border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
+             {/* 详情弹窗可以保持一定的遮挡性，或者也稍微透明 */}
+             <div className="w-full max-w-[320px] bg-[#25262b]/90 backdrop-blur border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
                <div className="p-3 border-b border-white/10 bg-white/5 flex justify-between items-center">
                  <div>
                     <div className="text-[10px] text-emerald-400 font-bold">详细编辑模式</div>
@@ -326,12 +351,34 @@ export default function App() {
                </div>
                <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
                  {getTasksForDate(selectedDateKey).map(t => (
-                   <div key={t.id} className="flex gap-2 items-start p-2 rounded hover:bg-white/5 group bg-black/20">
-                     <button onClick={() => handleToggleTodo(t.id)} className={`mt-0.5 w-3.5 h-3.5 rounded border flex items-center justify-center ${t.completed ? 'bg-emerald-600 border-transparent' : 'border-slate-500'}`}>
+                   <div key={t.id} className="flex gap-2 items-center p-2 rounded hover:bg-white/5 group bg-black/20">
+                     <button onClick={() => handleToggleTodo(t.id)} className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${t.completed ? 'bg-emerald-600 border-transparent' : 'border-slate-500'}`}>
                         {t.completed && <Check size={8} className="text-white"/>}
                      </button>
-                     <span className={`flex-1 text-xs break-all ${t.completed ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{t.text}</span>
-                     <button onClick={() => handleDeleteTodo(t.id)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400"><Trash2 size={10}/></button>
+                     
+                     <div className="flex-1 min-w-0">
+                       {modalEditingId === t.id ? (
+                         <input 
+                            autoFocus
+                            type="text"
+                            value={modalEditText}
+                            onChange={(e) => setModalEditText(e.target.value)}
+                            onBlur={finishModalEdit}
+                            onKeyDown={(e) => e.key === 'Enter' && finishModalEdit()}
+                            className="w-full bg-black/50 text-xs text-white px-1 py-0.5 rounded outline-none border border-emerald-500/50"
+                         />
+                       ) : (
+                         <span 
+                            onClick={() => startModalEdit(t)}
+                            className={`block text-xs break-all cursor-text ${t.completed ? 'text-slate-500 line-through' : 'text-slate-200'}`}
+                            title="点击编辑"
+                         >
+                            {t.text}
+                         </span>
+                       )}
+                     </div>
+
+                     <button onClick={() => handleDeleteTodo(t.id)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 flex-shrink-0"><Trash2 size={10}/></button>
                    </div>
                  ))}
                </div>
