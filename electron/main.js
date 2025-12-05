@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import AutoLaunch from 'auto-launch'
@@ -9,11 +9,17 @@ let mainWindow
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 600,
-    minWidth: 360,
-    minHeight: 320,
-    backgroundColor: '#1a1b1e',
+    width: 800,  // 默认宽度
+    height: 550, // 默认高度
+    minWidth: 320, // 最小宽度，防止缩太小导致内容错乱
+    minHeight: 300,
+    frame: false,       // 无边框
+    transparent: true,  // 透明背景
+    alwaysOnTop: true,  // 永远置顶
+    hasShadow: false,   // 去掉系统阴影（由 CSS 控制更好看）
+    resizable: true,    // 允许调整大小
+    skipTaskbar: false, // 是否在任务栏显示
+    backgroundColor: '#00000000', // 关键：背景完全透明
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -24,6 +30,14 @@ const createWindow = () => {
   const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
   mainWindow.loadFile(indexPath)
 }
+
+// 监听前端发来的“调整窗口大小”指令
+ipcMain.on('resize-window', (event, { width, height }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) {
+    win.setSize(Math.round(width), Math.round(height))
+  }
+})
 
 const enableAutoLaunch = async () => {
   try {
@@ -44,8 +58,8 @@ app.whenReady().then(async () => {
     app.quit()
     return
   }
-  await enableAutoLaunch()
   createWindow()
+  await enableAutoLaunch()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

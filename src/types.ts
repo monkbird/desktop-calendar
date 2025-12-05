@@ -13,8 +13,18 @@ export interface WindowState {
   height: number;
 }
 
+// 修改 HoverState，存储整个矩形信息
 export interface HoverState {
   dateKey: string;
-  x: number;
-  y: number;
+  targetRect: DOMRect; // 存储目标元素的布局信息
+}
+
+declare global {
+  interface Window {
+    desktopCalendar?: {
+      version: string;
+      resizeWindow: (size: { width: number; height: number }) => void;
+      setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;
+    };
+  }
 }

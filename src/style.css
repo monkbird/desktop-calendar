@@ -7,7 +7,9 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  
+  /* 确保根背景透明 */
+  background-color: transparent;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -15,59 +17,28 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 删除或注释掉原本的 a 标签样式，防止干扰 */
-/* a { ... } */
-
 body {
   margin: 0;
   display: flex;
-  place-items: center;
+  place-items: start; /* 从左上角开始布局 */
   min-width: 320px;
   min-height: 100vh;
+  background-color: transparent; /* body 透明 */
+  overflow: hidden; /* 防止滚动条 */
 }
-
-/* 删除原本的 h1 样式 */
 
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  /* 删除 padding: 2rem; 以避免干扰全屏布局 */
-  /* padding: 2rem; */ 
-  text-align: center;
+  width: 100%;
+  height: 100%;
+  background-color: transparent;
 }
 
-/* 删除 .logo, .card, .read-the-docs 等未使用的样式 */
+/* --- 关键：原生窗口拖拽区域 --- */
+.drag-region {
+  -webkit-app-region: drag;
+}
 
-/* ！！！关键修改：删除了所有全局 button 样式 ！！！ */
-/* button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-*/
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  /* 删除浅色模式下的 button 背景设置 */
-  /*
-  button {
-    background-color: #f9f9f9;
-  }
-  */
+/* 按钮区域必须设为不可拖拽，否则无法点击 */
+.no-drag {
+  -webkit-app-region: no-drag;
 }

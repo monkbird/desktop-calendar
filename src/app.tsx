@@ -12,9 +12,9 @@ import {
   X, 
   Check, 
   Trash2,
-  History // 新增图标
+  History 
 } from 'lucide-react';
-import type { Todo, WindowState, HoverState } from './types';
+import type { Todo, HoverState } from './types';
 import { 
   CHINESE_NUMS, 
   getDaysInMonth, 
@@ -24,20 +24,17 @@ import {
 } from './utils';
 import { InteractiveTooltip } from './components/InteractiveTooltip';
 import { CalendarCell } from './components/CalendarCell';
-import { HistoryModal } from './components/HistoryModal'; // 新增组件引用
+import { HistoryModal } from './components/HistoryModal'; 
 
 export default function App() {
-  // --- 状态管理 ---
   const [isLocked, setIsLocked] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  // 新增：历史窗口状态
   const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
 
-  const [winState, setWinState] = useState<WindowState>({ x: 50, y: 50, width: 800, height: 550 });
-  const [isDragging, setIsDragging] = useState(false);
+  // 默认宽高度
+  const [winSize, setWinSize] = useState({ width: 800, height: 550 });
   const [isResizing, setIsResizing] = useState(false);
-  const dragOffset = useRef({ x: 0, y: 0 });
-
+  
   const [todos, setTodos] = useState<Todo[]>(() => {
     const saved = localStorage.getItem('desktop-todos-v8');
     const todayStr = formatDateKey(new Date());
@@ -52,60 +49,58 @@ export default function App() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
-  
-  // 悬停状态
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
+  const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // --- 新增：跨夜自动刷新逻辑 ---
   const [nowDate, setNowDate] = useState(new Date());
 
+  // --- 窗口大小同步逻辑 ---
+  useEffect(() => {
+    setWinSize({ width: window.innerWidth, height: window.innerHeight });
+    const handleResize = () => {
+      setWinSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // 折叠逻辑
+  useEffect(() => {
+    if (isCollapsed) {
+       window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 48 });
+    } else {
+       if (winSize.height < 100) { 
+          window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 550 });
+       }
+    }
+  }, [isCollapsed]);
+
+  // 自动刷新日期
   useEffect(() => {
     const now = new Date();
-    const night = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() + 1, 
-      0, 0, 0 
-    );
+    const night = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
     const msToMidnight = night.getTime() - now.getTime();
-
-    const timer = setTimeout(() => {
-      setNowDate(new Date()); 
-    }, msToMidnight + 1000); 
-
+    const timer = setTimeout(() => { setNowDate(new Date()); }, msToMidnight + 1000); 
     return () => clearTimeout(timer);
   }, [nowDate]); 
 
-  // --- 持久化 ---
   useEffect(() => {
     localStorage.setItem('desktop-todos-v8', JSON.stringify(todos));
   }, [todos]);
 
-  // --- 窗口交互 (拖拽/缩放) ---
+  // --- 调整大小逻辑 ---
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (isLocked) return;
-      if (isDragging) {
-        let newX = e.clientX - dragOffset.current.x;
-        let newY = e.clientY - dragOffset.current.y;
-        const snapThreshold = 20;
-        if (Math.abs(newX) < snapThreshold) newX = 0;
-        if (Math.abs(newY) < snapThreshold) newY = 0;
-        if (Math.abs(newX + winState.width - window.innerWidth) < snapThreshold) newX = window.innerWidth - winState.width;
-        setWinState(prev => ({ ...prev, x: newX, y: newY }));
-      }
       if (isResizing && !isCollapsed) {
-        const newWidth = Math.max(320, e.clientX - winState.x);
-        const newHeight = Math.max(300, e.clientY - winState.y);
-        setWinState(prev => ({ ...prev, width: newWidth, height: newHeight }));
+        const newWidth = Math.max(320, e.clientX);
+        const newHeight = Math.max(300, e.clientY);
+        window.desktopCalendar?.resizeWindow({ width: newWidth, height: newHeight });
       }
     };
     const handleMouseUp = () => {
-      setIsDragging(false);
       setIsResizing(false);
     };
-    if (isDragging || isResizing) {
+    if (isResizing) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
     }
@@ -113,14 +108,7 @@ export default function App() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, isResizing, isLocked, isCollapsed, winState]);
-
-  const startDrag = (e: ReactMouseEvent) => {
-    if (isLocked) return;
-    if ((e.target as HTMLElement).closest('button')) return;
-    setIsDragging(true);
-    dragOffset.current = { x: e.clientX - winState.x, y: e.clientY - winState.y };
-  };
+  }, [isResizing, isCollapsed]);
 
   const startResize = (e: ReactMouseEvent) => {
     if (isLocked || isCollapsed) return;
@@ -128,22 +116,42 @@ export default function App() {
     setIsResizing(true);
   };
 
-  // --- 鼠标悬停逻辑 ---
+  // --- 关键修复：弹窗定位逻辑 (Smart Clamping) ---
   const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    if (isDragging || isResizing) return;
+    if (isResizing) return;
 
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const tooltipWidth = 260; 
-    let x = rect.right + 5;
-    let y = rect.top;
+    setHoverRect(rect);
+    // 弹窗尺寸预估 (宽240，高200)
+    const tooltipW = 240; 
+    const tooltipH = 220; 
+    const gap = 5;
 
-    if (x + tooltipWidth > window.innerWidth) x = rect.left - tooltipWidth - 5;
-    if (y + 350 > window.innerHeight) y = window.innerHeight - 350;
-    if (y < 0) y = 10;
+    // 1. 尝试放在右侧
+    let x = rect.right + gap;
+    
+    // 2. 如果右侧超出窗口，改为放在左侧
+    if (x + tooltipW > winSize.width) {
+        x = rect.left - tooltipW - gap;
+    }
+
+    // 3. 如果左侧也变成了负数（窗口极窄），强制“贴右边”显示
+    if (x < 0) {
+        x = winSize.width - tooltipW - gap;
+        // 极限修正：不能小于0
+        if (x < 0) x = 0; 
+    }
+
+    // 4. 垂直方向处理：尽量放上面，放不下放下面，再不行贴底
+    let y = rect.top;
+    if (y + tooltipH > winSize.height) {
+        y = winSize.height - tooltipH - gap;
+    }
+    if (y < 0) y = 0;
 
     if (hoverState?.dateKey !== dateKey) {
-        setHoverState({ dateKey, x, y });
+        setHoverState(() => ({ dateKey, x, y, targetRect: rect } as HoverState));
     }
   };
 
@@ -151,6 +159,7 @@ export default function App() {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     hoverTimeoutRef.current = setTimeout(() => {
         setHoverState(null);
+        setHoverRect(null);
     }, 300);
   };
 
@@ -158,10 +167,8 @@ export default function App() {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
   };
 
-  // --- 待办逻辑 ---
   const today = nowDate;
   const todayKey = formatDateKey(today);
-
   const getTasksForDate = (dateKey: string) => {
     const isToday = dateKey === todayKey;
     return todos.filter(todo => {
@@ -174,58 +181,43 @@ export default function App() {
       return 0;
     });
   };
-
   const handleAddTodo = (text: string, dateKey: string) => {
     if (!text.trim()) return;
     const newTodo: Todo = { id: crypto.randomUUID(), text, completed: false, targetDate: dateKey };
     setTodos([...todos, newTodo]);
   };
-
-const handleToggleTodo = (id: string) => {
+  const handleToggleTodo = (id: string) => {
     setTodos(todos.map(todo => {
       if (todo.id === id) {
         const isNowCompleted = !todo.completed;
         let newDate = todo.targetDate;
-
-        // 关键逻辑：
-        // 如果是执行“完成”操作，且该任务原本的日期早于今天（是延期下来的旧任务），
-        // 那么将其日期更新为“今天”，这样它就会乖乖留在今天的格子里（如截图效果）。
-        if (isNowCompleted && todo.targetDate < todayKey) {
-            newDate = todayKey;
-        }
-        
+        if (isNowCompleted && todo.targetDate < todayKey) newDate = todayKey;
         return { ...todo, completed: isNowCompleted, targetDate: newDate };
       }
       return todo;
     }));
   };
-
-  const handleDeleteTodo = (id: string) => {
-    setTodos(todos.filter(todo => todo.id !== id));
-  };
-
+  const handleDeleteTodo = (id: string) => setTodos(todos.filter(todo => todo.id !== id));
   const handleUpdateTodoText = (id: string, newText: string) => {
     if (!newText.trim()) return;
     setTodos(todos.map(t => t.id === id ? { ...t, text: newText } : t));
   };
 
-  // --- 渲染 ---
-  const isMiniMode = winState.width < 500 || winState.height < 450;
+  const isMiniMode = winSize.width < 500 || winSize.height < 450;
+  
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
   const calendarCells = [];
   
-  for (let i = 0; i < firstDay; i++) calendarCells.push(<div key={`empty-${i}`} className="border-r border-b border-white/5 bg-transparent"></div>);
+  for (let i = 0; i < firstDay; i++) calendarCells.push(<div key={`empty-${i}`} className="border-r border-b border-white/5 bg-transparent min-w-0"></div>);
   
   for (let i = 1; i <= daysInMonth; i++) {
     const d = new Date(year, month, i);
     const dateKey = formatDateKey(d);
     const isToday = dateKey === todayKey;
-
     const { lunarText, term, festival, workStatus } = getDateInfo(d);
-    
     const highlightText = festival || term; 
     
     calendarCells.push(
@@ -247,45 +239,34 @@ const handleToggleTodo = (id: string) => {
   }
 
   return (
-    <div 
-      className="fixed inset-0 overflow-hidden bg-cover bg-center select-none"
-      style={{ backgroundImage: 'url("https://images.unsplash.com/photo-1475274047050-1d0c0975c63e?q=80&w=2072&auto=format&fit=crop")' }}
-    >
+    <div className="w-full h-full flex flex-col overflow-hidden bg-transparent select-none">
+      
       <div 
-        style={{ 
-          transform: `translate(${winState.x}px, ${winState.y}px)`,
-          width: winState.width,
-          height: isCollapsed ? 48 : winState.height,
-        }}
-        className={`absolute flex flex-col bg-[#1a1b1e]/90 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-[height] duration-300 ease-in-out
+        className={`flex-1 flex flex-col bg-[#1a1b1e]/95 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-opacity duration-300
           ${isLocked ? 'border-red-500/30' : 'border-white/10'}
         `}
       >
         {/* --- 标题栏 --- */}
         <div 
-          onMouseDown={startDrag}
           className={`h-12 flex items-center justify-between px-3 border-b border-white/10 bg-[#202124]/80 flex-shrink-0
-            ${isLocked ? 'cursor-not-allowed' : 'cursor-move'}
+            ${isLocked ? '' : 'drag-region'}
           `}
         >
-          <div className="flex items-center gap-2">
-            <CalendarIcon size={16} className="text-emerald-400" />
-            <span className="text-sm font-medium text-slate-200">桌面日历</span>
-            {isMiniMode && !isCollapsed && <span className="text-[10px] bg-white/10 text-slate-400 px-1 rounded">Mini</span>}
+          <div className="flex items-center gap-2 min-w-0">
+            <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
+            <span className="text-sm font-medium text-slate-200 truncate">桌面日历</span>
+            {isMiniMode && !isCollapsed && <span className="text-[10px] bg-white/10 text-slate-400 px-1 rounded flex-shrink-0">Mini</span>}
           </div>
 
-          <div className="flex items-center gap-1">
-             {/* 新增：历史清单按钮 */}
-            <button 
+          <div className="flex items-center gap-1 no-drag flex-shrink-0">
+             <button 
               onClick={() => setIsHistoryOpen(true)} 
               className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors"
               title="历史清单"
             >
               <History size={14} />
             </button>
-
             <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
-
             <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400'}`}>
               {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
             </button>
@@ -296,19 +277,13 @@ const handleToggleTodo = (id: string) => {
         </div>
 
         {/* --- 主体内容 --- */}
-        <div className={`flex-1 flex flex-col min-h-0 relative ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'} transition-opacity duration-200`}>
+        <div className={`flex-1 flex flex-col min-h-0 relative ${isCollapsed ? 'hidden' : 'block'}`}>
           <div className="flex items-center justify-between px-4 py-2 bg-[#202124]/30 flex-shrink-0">
              <h2 className="text-lg font-light text-white flex items-end gap-1">
                <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
              </h2>
              <div className="flex gap-1">
-               <button 
-                 onClick={() => setCurrentDate(new Date())} 
-                 className="p-1 hover:bg-white/10 rounded text-emerald-400" 
-                 title="回到今天"
-               >
-                 <RotateCcw size={14} />
-               </button>
+               <button onClick={() => setCurrentDate(new Date())} className="p-1 hover:bg-white/10 rounded text-emerald-400" title="回到今天"><RotateCcw size={14} /></button>
                <div className="flex bg-white/5 rounded">
                  <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="p-1 hover:bg-white/10 rounded-l text-slate-300"><ChevronLeft size={16} /></button>
                  <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="p-1 hover:bg-white/10 rounded-r text-slate-300"><ChevronRight size={16} /></button>
@@ -329,7 +304,7 @@ const handleToggleTodo = (id: string) => {
           {!isLocked && (
             <div 
               onMouseDown={startResize}
-              className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-end justify-end p-0.5 z-20 group hover:bg-white/5 rounded-tl"
+              className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-end justify-end p-0.5 z-20 group hover:bg-white/5 rounded-tl no-drag"
             >
               <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="text-slate-600 group-hover:text-emerald-400 transition-colors">
                  <path d="M11 1L11 11L1 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
@@ -338,7 +313,7 @@ const handleToggleTodo = (id: string) => {
           )}
         </div>
 
-        {/* --- 保留的双击详情弹窗 --- */}
+        {/* --- 双击详情弹窗 --- */}
         {selectedDateKey && !isCollapsed && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
              <div className="w-full max-w-[320px] bg-[#25262b] border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
@@ -371,8 +346,10 @@ const handleToggleTodo = (id: string) => {
       </div>
 
       <InteractiveTooltip 
-        hoverState={hoverState}
+        targetRect={hoverRect}
+        containerSize={winSize}
         tasks={hoverState ? getTasksForDate(hoverState.dateKey) : []}
+        dateKey={hoverState ? hoverState.dateKey : todayKey}
         onMouseEnter={keepTooltipOpen}
         onMouseLeave={handleMouseLeaveAnywhere}
         onAddTodo={handleAddTodo}
@@ -381,7 +358,6 @@ const handleToggleTodo = (id: string) => {
         onUpdateTodoText={handleUpdateTodoText}
       />
 
-      {/* --- 新增：历史清单弹窗 --- */}
       <HistoryModal 
         isOpen={isHistoryOpen} 
         onClose={() => setIsHistoryOpen(false)}

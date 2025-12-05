@@ -39,37 +39,32 @@ export const CalendarCell: FC<CalendarCellProps> = ({
       `}
     >
       {/* 头部区域：日期 + 农历 */}
-      {/* 修改点 1: 无论是否 Mini 模式，都使用 justify-between 将左右推开 */}
       <div className={`flex flex-shrink-0 w-full justify-between items-start ${isMiniMode ? 'mb-0.5 px-0.5' : 'mb-1'}`}>
         
         {/* --- 左侧：休/班标识 + 日期数字 --- */}
         <div className="flex items-center gap-0.5 flex-shrink-0 min-w-0">
-          {/* Mini模式下也显示休班，但稍微做小一点 */}
           {workStatus && (
             <span 
               className={`flex items-center justify-center rounded text-white font-normal leading-none flex-shrink-0
                 ${workStatus === 'rest' ? 'bg-[#3b82f6]' : 'bg-[#ef4444]'} 
-                ${isMiniMode ? 'w-3 h-3 text-[8px] mr-0.5' : 'w-4 h-4 text-[10px] mr-1'}
+                ${isMiniMode ? 'w-2.5 h-2.5 text-[7px] mr-0.5' : 'w-4 h-4 text-[10px] mr-1'}
               `}
             >
               {workStatus === 'rest' ? '休' : '班'}
             </span>
           )}
           
-          <span className={`leading-none whitespace-nowrap ${isToday ? 'text-emerald-400 font-bold' : 'text-slate-200'} ${isMiniMode ? 'text-sm font-bold' : 'text-base font-medium'}`}>
+          <span className={`leading-none whitespace-nowrap ${isToday ? 'text-emerald-400 font-bold' : 'text-slate-200'} ${isMiniMode ? 'text-xs font-bold' : 'text-base font-medium'}`}>
             {day}
           </span>
         </div>
         
         {/* --- 右侧：农历/节气/今天标识 --- */}
-        {/* 修改点 2: 移除了 !isMiniMode 的判断，让农历在 Mini 模式下也显示 */}
-        <div className="flex flex-col items-end flex-shrink-0 ml-1">
-             {/* "今"字标在 Mini 模式下如果空间太挤可以选择不显示，这里保留但缩小 */}
-             {isToday && <span className={`bg-emerald-500 text-black font-bold rounded-sm mb-0.5 whitespace-nowrap ${isMiniMode ? 'text-[8px] px-0.5 scale-90 origin-right' : 'text-[10px] px-1'}`}>今</span>}
+        <div className="flex flex-col items-end flex-shrink-0 ml-1 min-w-0">
+             {isToday && <span className={`bg-emerald-500 text-black font-bold rounded-sm mb-0.5 whitespace-nowrap ${isMiniMode ? 'text-[7px] px-0.5 scale-90 origin-right' : 'text-[10px] px-1'}`}>今</span>}
              
-             {/* 农历文本 */}
              <span className={`truncate text-right ${term ? 'text-emerald-400 font-bold' : 'text-slate-500'} 
-               ${isMiniMode ? 'text-[9px] scale-90 origin-right max-w-[40px]' : 'text-[10px] max-w-[60px]'}
+               ${isMiniMode ? 'text-[8px] scale-90 origin-right max-w-[35px]' : 'text-[10px] max-w-[60px]'}
              `}>
                {term || lunar}
              </span>
@@ -78,9 +73,9 @@ export const CalendarCell: FC<CalendarCellProps> = ({
 
       {/* 任务列表区域 (圆点) */}
       {isMiniMode ? (
-        <div className="flex gap-0.5 flex-wrap justify-center overflow-hidden h-1.5 w-full px-1">
+        <div className="flex gap-0.5 flex-wrap justify-center overflow-hidden h-1.5 w-full px-0.5">
           {tasks.slice(0, 4).map(t => (
-            <div key={t.id} className={`w-1.5 h-1.5 rounded-full ${t.completed ? 'bg-slate-600' : 'bg-yellow-400'}`} />
+            <div key={t.id} className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${t.completed ? 'bg-slate-600' : 'bg-yellow-400'}`} />
           ))}
         </div>
       ) : (
@@ -88,7 +83,7 @@ export const CalendarCell: FC<CalendarCellProps> = ({
           {tasks.slice(0, 5).map(todo => (
             <div key={todo.id} className="flex items-center gap-1 w-full flex-shrink-0">
               <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${todo.completed ? 'bg-slate-600' : 'bg-yellow-400'}`}></div>
-              <span className={`text-[10px] truncate ${todo.completed ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{todo.text}</span>
+              <span className={`text-[10px] truncate min-w-0 ${todo.completed ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{todo.text}</span>
             </div>
           ))}
         </div>
