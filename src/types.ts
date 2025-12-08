@@ -3,7 +3,8 @@ export interface Todo {
   text: string;
   completed: boolean;
   targetDate: string; // 格式: YYYY-MM-DD
-  completedAt?: number;
+  completedAt?: number; // 完成时间戳 (毫秒)
+  createdAt?: number;   // 创建时间戳 (毫秒)
 }
 
 export interface WindowState {

@@ -13,9 +13,11 @@ import {
   Check, 
   Trash2,
   History,
-  User as UserIcon 
+  User as UserIcon,
+  Search,
+  Database
 } from 'lucide-react';
-import type { Session } from '@supabase/supabase-js'; // 需安装依赖
+import type { Session } from '@supabase/supabase-js';
 import type { Todo, HoverState } from './types';
 import { 
   CHINESE_NUMS, 
@@ -27,19 +29,24 @@ import {
 import { InteractiveTooltip } from './components/InteractiveTooltip';
 import { CalendarCell } from './components/CalendarCell';
 import { HistoryModal } from './components/HistoryModal'; 
-import { AuthModal } from './components/AuthModal'; // 需新建此组件
-import { supabase } from './supabase'; // 需新建此文件
+import { AuthModal } from './components/AuthModal';
+import { SearchModal } from './components/SearchModal';
+import { DataToolsModal } from './components/DataToolsModal';
+import { supabase } from './supabase';
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isDataToolsOpen, setIsDataToolsOpen] = useState(false);
 
   // Auth 状态
   const [session, setSession] = useState<Session | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const accountMenuCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const scheduleCloseAccountMenu = () => {
     if (accountMenuCloseRef.current) clearTimeout(accountMenuCloseRef.current);
     accountMenuCloseRef.current = setTimeout(() => setShowAccountMenu(false), 500);
@@ -49,15 +56,19 @@ export default function App() {
     accountMenuCloseRef.current = null;
   };
 
-  // 默认宽高度
   const [winSize, setWinSize] = useState({ width: 800, height: 550 });
   const [isResizing, setIsResizing] = useState(false);
   
   const [todos, setTodos] = useState<Todo[]>(() => {
     const saved = localStorage.getItem('desktop-todos-v8');
-    // 如果本地有缓存先用缓存，之后会被云端数据覆盖/合并
     return saved ? JSON.parse(saved) : [
-      { id: '1', text: '欢迎使用桌面日历', completed: false, targetDate: formatDateKey(new Date()) }
+      { 
+        id: '1', 
+        text: '欢迎使用桌面日历', 
+        completed: false, 
+        targetDate: formatDateKey(new Date()),
+        createdAt: Date.now() 
+      }
     ];
   });
   
@@ -69,13 +80,11 @@ export default function App() {
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowDate, setNowDate] = useState(new Date());
 
-  // 详细编辑模式的状态
   const [modalEditingId, setModalEditingId] = useState<string | null>(null);
   const [modalEditText, setModalEditText] = useState('');
 
-  // --- 1. Supabase Auth & Data Sync ---
+  // --- Supabase Auth & Data Sync ---
   
-  // 监听登录状态变化
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -90,7 +99,6 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 拉取数据
   const fetchTodos = async () => {
     const { data, error } = await supabase.from('todos').select('*');
     if (error) {
@@ -98,34 +106,35 @@ export default function App() {
       return;
     }
     if (data) {
-      // 转换数据库 snake_case 到本地 camelCase
       const cloudTodos: Todo[] = data.map(d => ({
         id: d.id,
         text: d.text,
         completed: d.completed,
-        targetDate: d.target_date
+        targetDate: d.target_date,
+        // 尝试从数据库字段映射时间，如果数据库有 created_at 字段
+        createdAt: d.created_at ? new Date(d.created_at).getTime() : undefined,
+        // 如果你有 completed_at 字段
+        completedAt: d.completed_at ? new Date(d.completed_at).getTime() : undefined
       }));
       setTodos(cloudTodos);
     }
   };
 
-  // 实时订阅 (Realtime)
+  // 实时订阅
   useEffect(() => {
     if (!session) return;
-
     const channel = supabase.channel('todos-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, (payload) => {
         const { eventType, new: newRec, old: oldRec } = payload as any;
-
         if (eventType === 'INSERT') {
           setTodos(prev => {
-            // 防止本地乐观更新导致的重复
             if (prev.some(t => t.id === newRec.id)) return prev;
             return [...prev, {
               id: newRec.id,
               text: newRec.text,
               completed: newRec.completed,
-              targetDate: newRec.target_date
+              targetDate: newRec.target_date,
+              createdAt: newRec.created_at ? new Date(newRec.created_at).getTime() : Date.now()
             }];
           });
         } else if (eventType === 'UPDATE') {
@@ -133,19 +142,19 @@ export default function App() {
             ...t,
             text: newRec.text,
             completed: newRec.completed,
-            targetDate: newRec.target_date
+            targetDate: newRec.target_date,
+            // 同步更新完成时间
+            completedAt: newRec.completed_at ? new Date(newRec.completed_at).getTime() : t.completedAt
           } : t));
         } else if (eventType === 'DELETE') {
           setTodos(prev => prev.filter(t => t.id !== oldRec.id));
         }
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [session]);
 
-
-  // --- 2. 窗口逻辑 ---
+  // --- 窗口逻辑 ---
 
   useEffect(() => {
     setWinSize({ width: window.innerWidth, height: window.innerHeight });
@@ -156,9 +165,7 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 锁定/调整大小逻辑 (IPC调用)
   useEffect(() => {
-    // 锁定时禁止系统调整大小
     window.desktopCalendar?.setResizable?.(!isLocked);
   }, [isLocked]);
 
@@ -172,7 +179,6 @@ export default function App() {
     }
   }, [isCollapsed]);
 
-  // 自动刷新日期
   useEffect(() => {
     const now = new Date();
     const night = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
@@ -185,7 +191,21 @@ export default function App() {
     localStorage.setItem('desktop-todos-v8', JSON.stringify(todos));
   }, [todos]);
 
-  // 手动拖拽调整大小 (针对无边框窗口的右下角)
+  // 全局快捷键
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        if (!isSearchOpen) {
+          setIsSearchOpen(true);
+          e.preventDefault();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSearchOpen]);
+
+  // 拖拽逻辑
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isResizing && !isCollapsed) {
@@ -229,16 +249,12 @@ export default function App() {
     });
   };
 
-  // 悬浮弹窗定位
   const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     if (isResizing) return;
 
     const tasks = getTasksForDate(dateKey);
-    // 允许空弹窗出现以便添加事项，或者保持原逻辑
     if (tasks.length === 0) {
-      // 这里可以根据需求决定是否显示空日期的弹窗，
-      // 原逻辑是 tasks.length === 0 则不显示，这里保持原逻辑
       setHoverState(null);
       setHoverRect(null);
       return;
@@ -251,19 +267,11 @@ export default function App() {
     const gap = 5;
 
     let x = rect.right + gap;
-    if (x + tooltipW > winSize.width) {
-        x = rect.left - tooltipW - gap;
-    }
-    if (x < 0) {
-        x = winSize.width - tooltipW - gap;
-        if (x < 0) x = 0; 
-    }
+    if (x + tooltipW > winSize.width) x = rect.left - tooltipW - gap;
+    if (x < 0) x = Math.max(0, winSize.width - tooltipW - gap);
 
     let y = rect.top;
-    if (y + tooltipH > winSize.height) {
-        y = winSize.height - tooltipH - gap;
-    }
-    if (y < 0) y = 0;
+    if (y + tooltipH > winSize.height) y = Math.max(0, winSize.height - tooltipH - gap);
 
     if (hoverState?.dateKey !== dateKey) {
         setHoverState(() => ({ dateKey, x, y, targetRect: rect } as HoverState));
@@ -282,27 +290,32 @@ export default function App() {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
   };
 
-  // --- CRUD 操作 (含 Supabase 同步) ---
+  // --- CRUD 操作 (含 Time Stamp) ---
 
   const handleAddTodo = async (text: string, dateKey: string) => {
     if (!text.trim()) return;
     const id = crypto.randomUUID();
-    const newTodo: Todo = { id, text, completed: false, targetDate: dateKey };
+    const nowTs = Date.now();
     
-    // 乐观更新 (Optimistic Update)
+    const newTodo: Todo = { 
+      id, 
+      text, 
+      completed: false, 
+      targetDate: dateKey,
+      createdAt: nowTs // 记录创建时间
+    };
+    
     setTodos(prev => [...prev, newTodo]);
 
     if (session) {
       const { error } = await supabase.from('todos').insert({
-        id, // 使用本地生成的 ID 确保一致
+        id,
         text,
         target_date: dateKey,
-        completed: false
+        completed: false,
+        created_at: new Date(nowTs).toISOString() // 假设数据库支持
       });
-      if (error) {
-        console.error('Add failed:', error);
-        // 可选：回滚状态
-      }
+      if (error) console.error('Add failed:', error);
     }
   };
 
@@ -314,13 +327,21 @@ export default function App() {
     let newDate = todo.targetDate;
     if (isNowCompleted && todo.targetDate < todayKey) newDate = todayKey;
 
-    // 乐观更新
-    setTodos(prev => prev.map(t => t.id === id ? { ...t, completed: isNowCompleted, targetDate: newDate } : t));
+    const nowTs = Date.now();
+    const completedAt = isNowCompleted ? nowTs : undefined;
+
+    setTodos(prev => prev.map(t => t.id === id ? { 
+      ...t, 
+      completed: isNowCompleted, 
+      targetDate: newDate,
+      completedAt // 更新完成时间
+    } : t));
 
     if (session) {
       const { error } = await supabase.from('todos').update({
         completed: isNowCompleted,
-        target_date: newDate
+        target_date: newDate,
+        completed_at: isNowCompleted ? new Date(nowTs).toISOString() : null
       }).eq('id', id);
       if (error) console.error('Toggle failed:', error);
     }
@@ -344,13 +365,34 @@ export default function App() {
     }
   };
 
+  // 批量导入逻辑
+  const handleBatchImport = async (importedTodos: Todo[]) => {
+    const existingIds = new Set(todos.map(t => t.id));
+    const newTodos = importedTodos.filter(t => !existingIds.has(t.id));
+    if (newTodos.length === 0) return;
+
+    setTodos(prev => [...prev, ...newTodos]);
+
+    if (session) {
+      const dbRows = newTodos.map(t => ({
+        id: t.id,
+        text: t.text,
+        completed: t.completed,
+        target_date: t.targetDate,
+        created_at: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
+        completed_at: t.completedAt ? new Date(t.completedAt).toISOString() : null
+      }));
+      const { error } = await supabase.from('todos').insert(dbRows);
+      if (error) console.error('Batch import sync failed:', error);
+    }
+  };
+
   const startModalEdit = (task: Todo) => {
     if (!task.completed) {
       setModalEditingId(task.id);
       setModalEditText(task.text);
     }
   };
-
   const finishModalEdit = () => {
     if (modalEditingId) {
       handleUpdateTodoText(modalEditingId, modalEditText);
@@ -360,15 +402,14 @@ export default function App() {
 
   const isMiniMode = winSize.width < 500 || winSize.height < 450;
   
-  // --- 日历生成逻辑 (含邻近月份填充) ---
-
+  // --- 日历生成 ---
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
   const calendarCells = [];
   
-  // 1. 填充上个月
+  // 上个月
   const prevMonthLastDate = new Date(year, month, 0); 
   const prevMonthDaysCount = prevMonthLastDate.getDate();
   const prevMonthYear = prevMonthLastDate.getFullYear();
@@ -395,12 +436,12 @@ export default function App() {
         onMouseEnter={handleMouseEnterCell}
         onMouseLeave={handleMouseLeaveAnywhere}
         onDoubleClick={setSelectedDateKey}
-        isOtherMonth={true} // 需在 CalendarCell 中支持此属性
+        isOtherMonth={true}
       />
     );
   }
   
-  // 2. 填充当月
+  // 当月
   for (let i = 1; i <= daysInMonth; i++) {
     const d = new Date(year, month, i);
     const dateKey = formatDateKey(d);
@@ -426,10 +467,9 @@ export default function App() {
     );
   }
 
-  // 3. 填充下个月 (补齐最后一行)
+  // 下个月
   const totalCellsSoFar = calendarCells.length;
   const cellsNeeded = (7 - (totalCellsSoFar % 7)) % 7;
-  
   for (let i = 1; i <= cellsNeeded; i++) {
     const d = new Date(year, month + 1, i);
     const dateKey = formatDateKey(d);
@@ -459,7 +499,7 @@ export default function App() {
     <div className="w-full h-full flex flex-col overflow-hidden bg-transparent select-none">
       
       <div 
-        className={`flex-1 flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hiddenHJ ring-1 ring-black/20 transition-opacity duration-300
+        className={`flex-1 flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-opacity duration-300
           ${isLocked ? 'border-red-500/30' : 'border-white/10'}
         `}
       >
@@ -476,6 +516,18 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
+             {/* 搜索按钮 */}
+             <button onClick={() => setIsSearchOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="搜索 (Ctrl+F)">
+               <Search size={14} />
+             </button>
+
+             {/* 数据工具按钮 */}
+             <button onClick={() => setIsDataToolsOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="数据导入/导出">
+               <Database size={14} />
+             </button>
+
+             <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
+
              {/* 登录按钮 */}
              <div className="relative" onMouseEnter={cancelCloseAccountMenu} onMouseLeave={scheduleCloseAccountMenu}>
                <button 
@@ -486,7 +538,7 @@ export default function App() {
                  <UserIcon size={14} />
                </button>
                {session && showAccountMenu && (
-                 <div className="absolute right-0 top-6 z-50 w-36 bg-[#1a1b1e] border border-white/10 rounded shadow-2xl" onMouseEnter={cancelCloseAccountMenu} onMouseLeave={scheduleCloseAccountMenu}>
+                 <div className="absolute right-0 top-6 z-50 w-36 bg-[#1a1b1e] border border-white/10 rounded shadow-2xl">
                    <div className="px-3 py-2 text-xs text-slate-400 truncate">{session.user.email}</div>
                    <button 
                      onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }}
@@ -627,7 +679,23 @@ export default function App() {
         onDeleteTodo={handleDeleteTodo}
       />
 
-      {/* 登录弹窗 */}
+      <SearchModal 
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        todos={todos}
+        onNavigate={(date) => {
+          setCurrentDate(date);
+          setIsSearchOpen(false);
+        }}
+      />
+
+      <DataToolsModal 
+        isOpen={isDataToolsOpen}
+        onClose={() => setIsDataToolsOpen(false)}
+        todos={todos}
+        onImport={handleBatchImport}
+      />
+
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
     </div>
   );
