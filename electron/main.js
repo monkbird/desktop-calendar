@@ -21,7 +21,7 @@ const createWindow = () => {
     frame: false,       // 无边框
     transparent: true,  // 透明背景
     alwaysOnTop: false,  // 永远置顶
-    hasShadow: false,   // 去掉系统阴影（由 CSS 控制更好看）
+    hasShadow: true,   // 去掉系统阴影（由 CSS 控制更好看）
     resizable: true,    // 允许调整大小
     skipTaskbar: true, // 是否在任务栏显示
     backgroundColor: '#00000000', // 关键：背景完全透明

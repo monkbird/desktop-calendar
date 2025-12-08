@@ -39,7 +39,7 @@ export const CalendarCell: FC<CalendarCellProps> = ({
       className={`relative p-1 border-r border-b border-white/5 flex flex-col group select-none transition-colors overflow-hidden
         ${isToday ? 'bg-emerald-500/5 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.5)]' : 'hover:bg-white/5'}
         ${isMiniMode ? 'min-h-[40px] justify-center' : 'min-h-[80px]'}
-        ${isOtherMonth ? 'opacity-30 bg-black/10' : ''} 
+        ${isOtherMonth ? 'opacity-60 bg-black/10' : ''} 
       `}
     >
       {/* 头部区域：日期 + 农历 */}
@@ -60,7 +60,7 @@ export const CalendarCell: FC<CalendarCellProps> = ({
           
           {/* [修改] 文字颜色逻辑：如果是其他月份，强制显示为灰色 */}
           <span className={`leading-none whitespace-nowrap 
-            ${isToday ? 'text-emerald-400 font-bold' : isOtherMonth ? 'text-slate-500' : 'text-slate-200'} 
+            ${isToday ? 'text-emerald-400 font-bold' : isOtherMonth ? 'text-slate-300' : 'text-slate-200'} 
             ${isMiniMode ? 'text-xs font-bold' : 'text-base font-medium'}
           `}>
             {day}

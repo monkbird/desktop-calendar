@@ -38,6 +38,16 @@ export default function App() {
   // Auth 状态
   const [session, setSession] = useState<Session | null>(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const accountMenuCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleCloseAccountMenu = () => {
+    if (accountMenuCloseRef.current) clearTimeout(accountMenuCloseRef.current);
+    accountMenuCloseRef.current = setTimeout(() => setShowAccountMenu(false), 500);
+  };
+  const cancelCloseAccountMenu = () => {
+    if (accountMenuCloseRef.current) clearTimeout(accountMenuCloseRef.current);
+    accountMenuCloseRef.current = null;
+  };
 
   // 默认宽高度
   const [winSize, setWinSize] = useState({ width: 800, height: 550 });
@@ -455,7 +465,7 @@ export default function App() {
       >
         {/* --- 标题栏 --- */}
         <div 
-          className={`h-12 flex items-center justify-between px-3 border-b border-white/10 bg-white/5 flex-shrink-0
+          className={`h-7.5 flex items-center justify-between px-2 border-b border-white/10 bg-white/5 flex-shrink-0
             ${isLocked ? '' : 'drag-region'}
           `}
         >
@@ -467,13 +477,26 @@ export default function App() {
 
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
              {/* 登录按钮 */}
-             <button 
-              onClick={() => setShowAuth(true)} 
-              className={`p-1.5 rounded hover:bg-white/10 transition-colors ${session ? 'text-emerald-400' : 'text-slate-400'}`}
-              title={session ? `已同步: ${session.user.email}` : "登录以同步"}
-            >
-              <UserIcon size={14} />
-            </button>
+             <div className="relative" onMouseEnter={cancelCloseAccountMenu} onMouseLeave={scheduleCloseAccountMenu}>
+               <button 
+                 onClick={() => { session ? setShowAccountMenu(v => !v) : setShowAuth(true); }} 
+                 className={`p-1.5 rounded hover:bg-white/10 transition-colors ${session ? 'text-emerald-400' : 'text-slate-400'}`}
+                 title={session ? `已同步: ${session.user.email}` : "登录以同步"}
+               >
+                 <UserIcon size={14} />
+               </button>
+               {session && showAccountMenu && (
+                 <div className="absolute right-0 top-6 z-50 w-36 bg-[#1a1b1e] border border-white/10 rounded shadow-2xl" onMouseEnter={cancelCloseAccountMenu} onMouseLeave={scheduleCloseAccountMenu}>
+                   <div className="px-3 py-2 text-xs text-slate-400 truncate">{session.user.email}</div>
+                   <button 
+                     onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }}
+                     className="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-white/10"
+                   >
+                     退出登录
+                   </button>
+                 </div>
+               )}
+             </div>
 
              <button 
               onClick={() => setIsHistoryOpen(true)} 
@@ -494,7 +517,7 @@ export default function App() {
 
         {/* --- 主体内容 --- */}
         <div className={`flex-1 flex flex-col min-h-0 relative ${isCollapsed ? 'hidden' : 'block'}`}>
-          <div className="flex items-center justify-between px-4 py-2 bg-white/5 flex-shrink-0">
+          <div className="flex items-center justify-between px-2 py-0.1 bg-white/5 flex-shrink-0">
              <h2 className="text-lg font-light text-white flex items-end gap-1">
                <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
              </h2>
