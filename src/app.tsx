@@ -12,8 +12,10 @@ import {
   X, 
   Check, 
   Trash2,
-  History 
+  History,
+  User as UserIcon 
 } from 'lucide-react';
+import type { Session } from '@supabase/supabase-js'; // 需安装依赖
 import type { Todo, HoverState } from './types';
 import { 
   CHINESE_NUMS, 
@@ -25,11 +27,17 @@ import {
 import { InteractiveTooltip } from './components/InteractiveTooltip';
 import { CalendarCell } from './components/CalendarCell';
 import { HistoryModal } from './components/HistoryModal'; 
+import { AuthModal } from './components/AuthModal'; // 需新建此组件
+import { supabase } from './supabase'; // 需新建此文件
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
+
+  // Auth 状态
+  const [session, setSession] = useState<Session | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
 
   // 默认宽高度
   const [winSize, setWinSize] = useState({ width: 800, height: 550 });
@@ -37,12 +45,9 @@ export default function App() {
   
   const [todos, setTodos] = useState<Todo[]>(() => {
     const saved = localStorage.getItem('desktop-todos-v8');
-    const todayStr = formatDateKey(new Date());
+    // 如果本地有缓存先用缓存，之后会被云端数据覆盖/合并
     return saved ? JSON.parse(saved) : [
-      { id: '1', text: '安康杯安全竞赛准备', completed: false, targetDate: todayStr },
-      { id: '2', text: '26年QC报告', completed: false, targetDate: todayStr },
-      { id: '3', text: '安全隐患排查', completed: false, targetDate: todayStr },
-      { id: '4', text: '历史任务归档', completed: true, targetDate: '2023-01-01' },
+      { id: '1', text: '欢迎使用桌面日历', completed: false, targetDate: formatDateKey(new Date()) }
     ];
   });
   
@@ -54,11 +59,84 @@ export default function App() {
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nowDate, setNowDate] = useState(new Date());
 
-  // --- 详细编辑模式的状态 ---
+  // 详细编辑模式的状态
   const [modalEditingId, setModalEditingId] = useState<string | null>(null);
   const [modalEditText, setModalEditText] = useState('');
 
-  // --- 窗口大小同步逻辑 ---
+  // --- 1. Supabase Auth & Data Sync ---
+  
+  // 监听登录状态变化
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) fetchTodos();
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) fetchTodos();
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 拉取数据
+  const fetchTodos = async () => {
+    const { data, error } = await supabase.from('todos').select('*');
+    if (error) {
+      console.error('Fetch error:', error);
+      return;
+    }
+    if (data) {
+      // 转换数据库 snake_case 到本地 camelCase
+      const cloudTodos: Todo[] = data.map(d => ({
+        id: d.id,
+        text: d.text,
+        completed: d.completed,
+        targetDate: d.target_date
+      }));
+      setTodos(cloudTodos);
+    }
+  };
+
+  // 实时订阅 (Realtime)
+  useEffect(() => {
+    if (!session) return;
+
+    const channel = supabase.channel('todos-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, (payload) => {
+        const { eventType, new: newRec, old: oldRec } = payload as any;
+
+        if (eventType === 'INSERT') {
+          setTodos(prev => {
+            // 防止本地乐观更新导致的重复
+            if (prev.some(t => t.id === newRec.id)) return prev;
+            return [...prev, {
+              id: newRec.id,
+              text: newRec.text,
+              completed: newRec.completed,
+              targetDate: newRec.target_date
+            }];
+          });
+        } else if (eventType === 'UPDATE') {
+          setTodos(prev => prev.map(t => t.id === newRec.id ? {
+            ...t,
+            text: newRec.text,
+            completed: newRec.completed,
+            targetDate: newRec.target_date
+          } : t));
+        } else if (eventType === 'DELETE') {
+          setTodos(prev => prev.filter(t => t.id !== oldRec.id));
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [session]);
+
+
+  // --- 2. 窗口逻辑 ---
+
   useEffect(() => {
     setWinSize({ width: window.innerWidth, height: window.innerHeight });
     const handleResize = () => {
@@ -68,7 +146,12 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 折叠逻辑
+  // 锁定/调整大小逻辑 (IPC调用)
+  useEffect(() => {
+    // 锁定时禁止系统调整大小
+    window.desktopCalendar?.setResizable?.(!isLocked);
+  }, [isLocked]);
+
   useEffect(() => {
     if (isCollapsed) {
        window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 48 });
@@ -92,7 +175,7 @@ export default function App() {
     localStorage.setItem('desktop-todos-v8', JSON.stringify(todos));
   }, [todos]);
 
-  // --- 调整大小逻辑 ---
+  // 手动拖拽调整大小 (针对无边框窗口的右下角)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isResizing && !isCollapsed) {
@@ -136,13 +219,16 @@ export default function App() {
     });
   };
 
-  // --- 关键修复：弹窗定位逻辑 (Smart Clamping) ---
+  // 悬浮弹窗定位
   const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     if (isResizing) return;
 
     const tasks = getTasksForDate(dateKey);
+    // 允许空弹窗出现以便添加事项，或者保持原逻辑
     if (tasks.length === 0) {
+      // 这里可以根据需求决定是否显示空日期的弹窗，
+      // 原逻辑是 tasks.length === 0 则不显示，这里保持原逻辑
       setHoverState(null);
       setHoverRect(null);
       return;
@@ -186,26 +272,66 @@ export default function App() {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
   };
 
-  const handleAddTodo = (text: string, dateKey: string) => {
+  // --- CRUD 操作 (含 Supabase 同步) ---
+
+  const handleAddTodo = async (text: string, dateKey: string) => {
     if (!text.trim()) return;
-    const newTodo: Todo = { id: crypto.randomUUID(), text, completed: false, targetDate: dateKey };
-    setTodos([...todos, newTodo]);
-  };
-  const handleToggleTodo = (id: string) => {
-    setTodos(todos.map(todo => {
-      if (todo.id === id) {
-        const isNowCompleted = !todo.completed;
-        let newDate = todo.targetDate;
-        if (isNowCompleted && todo.targetDate < todayKey) newDate = todayKey;
-        return { ...todo, completed: isNowCompleted, targetDate: newDate };
+    const id = crypto.randomUUID();
+    const newTodo: Todo = { id, text, completed: false, targetDate: dateKey };
+    
+    // 乐观更新 (Optimistic Update)
+    setTodos(prev => [...prev, newTodo]);
+
+    if (session) {
+      const { error } = await supabase.from('todos').insert({
+        id, // 使用本地生成的 ID 确保一致
+        text,
+        target_date: dateKey,
+        completed: false
+      });
+      if (error) {
+        console.error('Add failed:', error);
+        // 可选：回滚状态
       }
-      return todo;
-    }));
+    }
   };
-  const handleDeleteTodo = (id: string) => setTodos(todos.filter(todo => todo.id !== id));
-  const handleUpdateTodoText = (id: string, newText: string) => {
+
+  const handleToggleTodo = async (id: string) => {
+    const todo = todos.find(t => t.id === id);
+    if (!todo) return;
+
+    const isNowCompleted = !todo.completed;
+    let newDate = todo.targetDate;
+    if (isNowCompleted && todo.targetDate < todayKey) newDate = todayKey;
+
+    // 乐观更新
+    setTodos(prev => prev.map(t => t.id === id ? { ...t, completed: isNowCompleted, targetDate: newDate } : t));
+
+    if (session) {
+      const { error } = await supabase.from('todos').update({
+        completed: isNowCompleted,
+        target_date: newDate
+      }).eq('id', id);
+      if (error) console.error('Toggle failed:', error);
+    }
+  };
+
+  const handleDeleteTodo = async (id: string) => {
+    setTodos(prev => prev.filter(t => t.id !== id));
+    if (session) {
+      const { error } = await supabase.from('todos').delete().eq('id', id);
+      if (error) console.error('Delete failed:', error);
+    }
+  };
+
+  const handleUpdateTodoText = async (id: string, newText: string) => {
     if (!newText.trim()) return;
-    setTodos(todos.map(t => t.id === id ? { ...t, text: newText } : t));
+    setTodos(prev => prev.map(t => t.id === id ? { ...t, text: newText } : t));
+    
+    if (session) {
+      const { error } = await supabase.from('todos').update({ text: newText }).eq('id', id);
+      if (error) console.error('Update text failed:', error);
+    }
   };
 
   const startModalEdit = (task: Todo) => {
@@ -224,14 +350,47 @@ export default function App() {
 
   const isMiniMode = winSize.width < 500 || winSize.height < 450;
   
+  // --- 日历生成逻辑 (含邻近月份填充) ---
+
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
   const calendarCells = [];
   
-  for (let i = 0; i < firstDay; i++) calendarCells.push(<div key={`empty-${i}`} className="border-r border-b border-white/5 bg-transparent min-w-0"></div>);
+  // 1. 填充上个月
+  const prevMonthLastDate = new Date(year, month, 0); 
+  const prevMonthDaysCount = prevMonthLastDate.getDate();
+  const prevMonthYear = prevMonthLastDate.getFullYear();
+  const prevMonthIdx = prevMonthLastDate.getMonth();
+
+  for (let i = 0; i < firstDay; i++) {
+    const dayNum = prevMonthDaysCount - firstDay + i + 1;
+    const d = new Date(prevMonthYear, prevMonthIdx, dayNum);
+    const dateKey = formatDateKey(d);
+    const { lunarText, term, festival, workStatus } = getDateInfo(d);
+    const highlightText = festival || term;
+
+    calendarCells.push(
+      <CalendarCell 
+        key={`prev-${dateKey}`}
+        day={dayNum}
+        dateKey={dateKey}
+        isToday={false}
+        tasks={getTasksForDate(dateKey)}
+        term={highlightText}
+        lunar={lunarText}
+        workStatus={workStatus}
+        isMiniMode={isMiniMode}
+        onMouseEnter={handleMouseEnterCell}
+        onMouseLeave={handleMouseLeaveAnywhere}
+        onDoubleClick={setSelectedDateKey}
+        isOtherMonth={true} // 需在 CalendarCell 中支持此属性
+      />
+    );
+  }
   
+  // 2. 填充当月
   for (let i = 1; i <= daysInMonth; i++) {
     const d = new Date(year, month, i);
     const dateKey = formatDateKey(d);
@@ -257,17 +416,44 @@ export default function App() {
     );
   }
 
+  // 3. 填充下个月 (补齐最后一行)
+  const totalCellsSoFar = calendarCells.length;
+  const cellsNeeded = (7 - (totalCellsSoFar % 7)) % 7;
+  
+  for (let i = 1; i <= cellsNeeded; i++) {
+    const d = new Date(year, month + 1, i);
+    const dateKey = formatDateKey(d);
+    const { lunarText, term, festival, workStatus } = getDateInfo(d);
+    const highlightText = festival || term;
+
+    calendarCells.push(
+      <CalendarCell 
+        key={`next-${dateKey}`}
+        day={i}
+        dateKey={dateKey}
+        isToday={false}
+        tasks={getTasksForDate(dateKey)}
+        term={highlightText}
+        lunar={lunarText}
+        workStatus={workStatus}
+        isMiniMode={isMiniMode}
+        onMouseEnter={handleMouseEnterCell}
+        onMouseLeave={handleMouseLeaveAnywhere}
+        onDoubleClick={setSelectedDateKey}
+        isOtherMonth={true}
+      />
+    );
+  }
+
   return (
     <div className="w-full h-full flex flex-col overflow-hidden bg-transparent select-none">
       
-      {/* 修改点：背景改为更透明的 bg-black/30 (原为 bg-[#1a1b1e]/95) */}
       <div 
-        className={`flex-1 flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-opacity duration-300
+        className={`flex-1 flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hiddenHJ ring-1 ring-black/20 transition-opacity duration-300
           ${isLocked ? 'border-red-500/30' : 'border-white/10'}
         `}
       >
         {/* --- 标题栏 --- */}
-        {/* 修改点：标题栏背景改为 bg-white/5 (原为 bg-[#202124]/80) */}
         <div 
           className={`h-12 flex items-center justify-between px-3 border-b border-white/10 bg-white/5 flex-shrink-0
             ${isLocked ? '' : 'drag-region'}
@@ -280,6 +466,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
+             {/* 登录按钮 */}
+             <button 
+              onClick={() => setShowAuth(true)} 
+              className={`p-1.5 rounded hover:bg-white/10 transition-colors ${session ? 'text-emerald-400' : 'text-slate-400'}`}
+              title={session ? `已同步: ${session.user.email}` : "登录以同步"}
+            >
+              <UserIcon size={14} />
+            </button>
+
              <button 
               onClick={() => setIsHistoryOpen(true)} 
               className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors"
@@ -299,7 +494,6 @@ export default function App() {
 
         {/* --- 主体内容 --- */}
         <div className={`flex-1 flex flex-col min-h-0 relative ${isCollapsed ? 'hidden' : 'block'}`}>
-          {/* 修改点：控制栏背景更透明 bg-white/5 */}
           <div className="flex items-center justify-between px-4 py-2 bg-white/5 flex-shrink-0">
              <h2 className="text-lg font-light text-white flex items-end gap-1">
                <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
@@ -313,14 +507,12 @@ export default function App() {
              </div>
           </div>
 
-          {/* 修改点：星期栏背景改为透明 bg-transparent 或 bg-black/10 */}
           <div className="grid grid-cols-7 border-b border-white/5 bg-black/10 flex-shrink-0">
             {CHINESE_NUMS.slice(0, 7).map((d,i)=>(
               <div key={i} className="text-[10px] text-slate-500 py-1 text-center">{d}</div>
             ))}
           </div>
 
-          {/* 修改点：日历网格背景改为 bg-transparent (原为 bg-[#1a1b1e]) */}
           <div className="flex-1 grid grid-cols-7 auto-rows-fr overflow-hidden bg-transparent">
             {calendarCells}
           </div>
@@ -340,7 +532,6 @@ export default function App() {
         {/* --- 双击详情弹窗 --- */}
         {selectedDateKey && !isCollapsed && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-             {/* 详情弹窗可以保持一定的遮挡性，或者也稍微透明 */}
              <div className="w-full max-w-[320px] bg-[#25262b]/90 backdrop-blur border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
                <div className="p-3 border-b border-white/10 bg-white/5 flex justify-between items-center">
                  <div>
@@ -412,6 +603,9 @@ export default function App() {
         onToggleTodo={handleToggleTodo}
         onDeleteTodo={handleDeleteTodo}
       />
+
+      {/* 登录弹窗 */}
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
     </div>
   );
 }

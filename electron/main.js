@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import AutoLaunch from 'auto-launch'
@@ -9,8 +9,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 app.disableHardwareAcceleration();
 
 let mainWindow
+let tray
 
 const createWindow = () => {
+  const isDev = !!process.env.ELECTRON_START_URL
   mainWindow = new BrowserWindow({
     width: 800,  // 默认宽度
     height: 550, // 默认高度
@@ -29,12 +31,18 @@ const createWindow = () => {
       nodeIntegration: false,
       // --- 优化 2: 内存优化配置 ---
       spellcheck: false, // 禁用拼写检查，省内存
-      devTools: false // 生产环境禁用 DevTools (构建后生效)
+      devTools: isDev ? true : false
     }
   })
 
-  const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
-  mainWindow.loadFile(indexPath)
+  const devUrl = process.env.ELECTRON_START_URL
+  if (devUrl) {
+    mainWindow.loadURL(devUrl)
+    mainWindow.webContents.openDevTools({ mode: 'detach' })
+  } else {
+    const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
+    mainWindow.loadFile(indexPath)
+  }
 // 【修改点1】添加边缘吸附逻辑
   mainWindow.on('move', () => {
     // 获取当前窗口位置和大小
@@ -78,7 +86,9 @@ const createWindow = () => {
 const createTray = () => {
   // 这里暂时使用构建后的 public 目录下的图标，建议换成专门的 tray icon (ico/png)
   // 注意：生产环境和开发环境路径可能不同，建议准备一个 icon.png 放在 public 目录
-  const iconPath = path.join(__dirname, '..', 'dist', 'vite.svg') 
+  const iconPath = app.isPackaged
+    ? path.join(__dirname, '..', 'dist', 'vite.svg')
+    : path.join(__dirname, '..', 'public', 'vite.svg')
   const icon = nativeImage.createFromPath(iconPath)
   
   tray = new Tray(icon)
@@ -121,6 +131,14 @@ ipcMain.on('resize-window', (event, { width, height }) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (win) {
     win.setSize(Math.round(width), Math.round(height))
+  }
+})
+
+// [新增] 监听设置是否可调整大小 (用于锁定模式)
+ipcMain.on('set-resizable', (event, resizable) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) {
+    win.setResizable(resizable)
   }
 })
 

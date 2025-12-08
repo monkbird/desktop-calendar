@@ -13,6 +13,7 @@ interface CalendarCellProps {
   onMouseEnter: (dateKey: string, e: MouseEvent) => void;
   onMouseLeave: () => void;
   onDoubleClick: (dateKey: string) => void;
+  isOtherMonth?: boolean; 
 }
 
 export const CalendarCell: FC<CalendarCellProps> = ({
@@ -27,15 +28,18 @@ export const CalendarCell: FC<CalendarCellProps> = ({
   onMouseEnter,
   onMouseLeave,
   onDoubleClick,
+  isOtherMonth = false, // [新增] 默认为 false
 }) => {
   return (
     <div 
       onMouseEnter={(e) => onMouseEnter(dateKey, e)}
       onMouseLeave={onMouseLeave}
       onDoubleClick={() => onDoubleClick(dateKey)}
+      // [修改] className 中添加 isOtherMonth 的样式判断 (opacity-30 bg-black/10)
       className={`relative p-1 border-r border-b border-white/5 flex flex-col group select-none transition-colors overflow-hidden
         ${isToday ? 'bg-emerald-500/5 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.5)]' : 'hover:bg-white/5'}
         ${isMiniMode ? 'min-h-[40px] justify-center' : 'min-h-[80px]'}
+        ${isOtherMonth ? 'opacity-30 bg-black/10' : ''} 
       `}
     >
       {/* 头部区域：日期 + 农历 */}
@@ -54,7 +58,11 @@ export const CalendarCell: FC<CalendarCellProps> = ({
             </span>
           )}
           
-          <span className={`leading-none whitespace-nowrap ${isToday ? 'text-emerald-400 font-bold' : 'text-slate-200'} ${isMiniMode ? 'text-xs font-bold' : 'text-base font-medium'}`}>
+          {/* [修改] 文字颜色逻辑：如果是其他月份，强制显示为灰色 */}
+          <span className={`leading-none whitespace-nowrap 
+            ${isToday ? 'text-emerald-400 font-bold' : isOtherMonth ? 'text-slate-500' : 'text-slate-200'} 
+            ${isMiniMode ? 'text-xs font-bold' : 'text-base font-medium'}
+          `}>
             {day}
           </span>
         </div>
@@ -62,7 +70,6 @@ export const CalendarCell: FC<CalendarCellProps> = ({
         {/* --- 右侧：农历/节气/今天标识 --- */}
         <div className="flex flex-col items-end flex-shrink-0 ml-1 min-w-0">
              {isToday && <span className={`bg-emerald-500 text-black font-bold rounded-sm mb-0.5 whitespace-nowrap ${isMiniMode ? 'text-[7px] px-0.5 scale-90 origin-right' : 'text-[10px] px-1'}`}>今</span>}
-             
              <span className={`truncate text-right ${term ? 'text-emerald-400 font-bold' : 'text-slate-500'} 
                ${isMiniMode ? 'text-[8px] scale-90 origin-right max-w-[35px]' : 'text-[10px] max-w-[60px]'}
              `}>

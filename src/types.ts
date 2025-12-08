@@ -13,18 +13,21 @@ export interface WindowState {
   height: number;
 }
 
-// 修改 HoverState，存储整个矩形信息
 export interface HoverState {
   dateKey: string;
-  targetRect: DOMRect; // 存储目标元素的布局信息
+  x: number;
+  y: number;
 }
 
+// 扩展 window 对象，增加 resizeWindow 方法
 declare global {
   interface Window {
     desktopCalendar?: {
       version: string;
       resizeWindow: (size: { width: number; height: number }) => void;
       setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;
+      // [新增] 允许 React 告诉 Electron 是否可调整大小
+      setResizable: (resizable: boolean) => void;
     };
   }
 }
