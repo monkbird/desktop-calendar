@@ -49,7 +49,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "public/icon.png"
     },
     "nsis": {
       "oneClick": false,

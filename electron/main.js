@@ -25,13 +25,14 @@ const createWindow = () => {
     resizable: true,    // 允许调整大小
     skipTaskbar: true, // 是否在任务栏显示
     backgroundColor: '#00000000', // 关键：背景完全透明
+    icon: path.join(__dirname, '..', 'public', 'icon.png'), // 设置窗口图标
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       // --- 优化 2: 内存优化配置 ---
       spellcheck: false, // 禁用拼写检查，省内存
-      devTools: isDev ? true : false
+      devTools: false // 生产环境禁用 DevTools (构建后生效)
     }
   })
 
@@ -84,11 +85,14 @@ const createWindow = () => {
 }
 // 【新增】创建系统托盘
 const createTray = () => {
-  // 这里暂时使用构建后的 public 目录下的图标，建议换成专门的 tray icon (ico/png)
-  // 注意：生产环境和开发环境路径可能不同，建议准备一个 icon.png 放在 public 目录
+  // 根据环境选择图标路径
+  // 开发环境: public/icon.png
+  // 生产环境: dist/icon.png (因为打包时 public 下的文件会被复制到 dist)
+  const iconFileName = 'icon.png';
   const iconPath = app.isPackaged
-    ? path.join(__dirname, '..', 'dist', 'vite.svg')
-    : path.join(__dirname, '..', 'public', 'vite.svg')
+    ? path.join(__dirname, '..', 'dist', iconFileName)
+    : path.join(__dirname, '..', 'public', iconFileName);
+    
   const icon = nativeImage.createFromPath(iconPath)
   
   tray = new Tray(icon)
