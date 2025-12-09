@@ -512,7 +512,6 @@ export default function App() {
           <div className="flex items-center gap-2 min-w-0">
             <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
             <span className="text-sm font-medium text-slate-200 truncate">桌面日历</span>
-            {isMiniMode && !isCollapsed && <span className="text-[10px] bg-white/10 text-slate-400 px-1 rounded flex-shrink-0">Mini</span>}
           </div>
 
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
