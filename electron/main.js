@@ -24,7 +24,7 @@ const createWindow = () => {
     hasShadow: true,   // 去掉系统阴影（由 CSS 控制更好看）
     resizable: true,    // 允许调整大小
     skipTaskbar: true, // 是否在任务栏显示
-    backgroundColor: '#00000000', // 关键：背景完全透明
+    backgroundColor: '#0000001A', // 约 10% 透明度
     icon: path.join(__dirname, '..', 'public', 'icon.png'), // 设置窗口图标
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

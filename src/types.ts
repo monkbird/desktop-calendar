@@ -1,12 +1,27 @@
+// src/types.ts
+
 export interface Todo {
   id: string;
   text: string;
   completed: boolean;
-  targetDate: string; // 格式: YYYY-MM-DD
-  completedAt?: number; // 完成时间戳 (毫秒)
-  createdAt?: number;   // 创建时间戳 (毫秒)
+  targetDate: string; 
+  completedAt?: number;
+  createdAt?: number;
+  updatedAt?: number; // 新增：用于同步冲突判断
 }
 
+// 新增：同步动作类型
+export type SyncActionType = 'INSERT' | 'UPDATE' | 'DELETE';
+
+// 新增：队列中的单个任务结构
+export interface SyncAction {
+  id: string; // 任务ID
+  type: SyncActionType;
+  payload: Partial<Todo> | string; // 数据体或ID
+  timestamp: number; // 操作产生的时间
+}
+
+// ... 保持 WindowState 等其他定义不变
 export interface WindowState {
   x: number;
   y: number;
@@ -20,14 +35,12 @@ export interface HoverState {
   y: number;
 }
 
-// 扩展 window 对象，增加 resizeWindow 方法
 declare global {
   interface Window {
     desktopCalendar?: {
       version: string;
       resizeWindow: (size: { width: number; height: number }) => void;
       setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;
-      // [新增] 允许 React 告诉 Electron 是否可调整大小
       setResizable: (resizable: boolean) => void;
     };
   }

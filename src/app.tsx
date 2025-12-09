@@ -18,7 +18,7 @@ import {
   Database
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
-import type { Todo, HoverState } from './types';
+import type { Todo, HoverState, SyncAction } from './types'; // [已更新] 引入 SyncAction
 import { 
   CHINESE_NUMS, 
   getDaysInMonth, 
@@ -67,7 +67,8 @@ export default function App() {
         text: '欢迎使用桌面日历', 
         completed: false, 
         targetDate: formatDateKey(new Date()),
-        createdAt: Date.now() 
+        createdAt: Date.now(),
+        updatedAt: Date.now() 
       }
     ];
   });
@@ -83,7 +84,19 @@ export default function App() {
   const [modalEditingId, setModalEditingId] = useState<string | null>(null);
   const [modalEditText, setModalEditText] = useState('');
 
-  // --- Supabase Auth & Data Sync ---
+  // --- [新增] 同步队列状态 ---
+  // 用于存储离线或请求失败时的操作
+  const [syncQueue, setSyncQueue] = useState<SyncAction[]>(() => {
+    const saved = localStorage.getItem('desktop-sync-queue');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // --- [新增] 持久化同步队列 ---
+  useEffect(() => {
+    localStorage.setItem('desktop-sync-queue', JSON.stringify(syncQueue));
+  }, [syncQueue]);
+
+  // --- [核心] Supabase Auth & Data Sync ---
   
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -99,60 +112,161 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // --- [新增] 同步队列处理器 ---
+  // 当网络恢复或有新操作加入时调用
+  const processSyncQueue = async () => {
+    if (!session || syncQueue.length === 0) return;
+    if (!navigator.onLine) return; 
+
+    const queueToProcess = [...syncQueue];
+    const remainingQueue: SyncAction[] = [];
+
+    // 逐个处理队列中的操作
+    for (const action of queueToProcess) {
+      const { type, payload, id } = action;
+      let error = null;
+
+      try {
+        if (type === 'INSERT') {
+          const t = payload as Todo;
+          const dbRow = {
+            id: t.id,
+            text: t.text,
+            completed: t.completed,
+            target_date: t.targetDate,
+            created_at: new Date(t.createdAt || Date.now()).toISOString(),
+            completed_at: t.completedAt ? new Date(t.completedAt).toISOString() : null,
+            updated_at: new Date(t.updatedAt || Date.now()).toISOString()
+          };
+          const res = await supabase.from('todos').insert(dbRow);
+          error = res.error;
+        } else if (type === 'UPDATE') {
+          const t = payload as Partial<Todo>;
+          const updates: any = { updated_at: new Date(Date.now()).toISOString() };
+          if (t.text !== undefined) updates.text = t.text;
+          if (t.completed !== undefined) {
+            updates.completed = t.completed;
+            updates.completed_at = t.completed ? new Date().toISOString() : null;
+          }
+          if (t.targetDate !== undefined) updates.target_date = t.targetDate;
+
+          const res = await supabase.from('todos').update(updates).eq('id', id);
+          error = res.error;
+        } else if (type === 'DELETE') {
+          const res = await supabase.from('todos').delete().eq('id', id);
+          error = res.error;
+        }
+      } catch (e) {
+        console.error("Sync action exception:", e);
+        error = e;
+      }
+
+      if (error) {
+        console.warn('Sync failed, keeping in queue:', action, error);
+        // 如果是唯一性冲突(23505)或记录未找到，可能不需要重试，这里简单起见全部保留重试，
+        // 除非是严重的网络无关错误（实际生产中可细化）。
+        remainingQueue.push(action); 
+      }
+    }
+
+    setSyncQueue(remainingQueue);
+  };
+
+  // --- [新增] 监听网络上线事件 ---
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('Network online, processing sync queue...');
+      processSyncQueue();
+      fetchTodos(); // 网络恢复后，智能拉取最新数据
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [syncQueue, session]);
+
+  // --- [修改] 智能合并拉取逻辑 ---
   const fetchTodos = async () => {
+    if (!session) return;
     const { data, error } = await supabase.from('todos').select('*');
     if (error) {
       console.error('Fetch error:', error);
       return;
     }
+
     if (data) {
       const cloudTodos: Todo[] = data.map(d => ({
         id: d.id,
         text: d.text,
         completed: d.completed,
         targetDate: d.target_date,
-        // 尝试从数据库字段映射时间，如果数据库有 created_at 字段
-        createdAt: d.created_at ? new Date(d.created_at).getTime() : undefined,
-        // 如果你有 completed_at 字段
-        completedAt: d.completed_at ? new Date(d.completed_at).getTime() : undefined
+        createdAt: d.created_at ? new Date(d.created_at).getTime() : 0,
+        completedAt: d.completed_at ? new Date(d.completed_at).getTime() : undefined,
+        updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : 0 // 必须确保数据库有此字段
       }));
-      setTodos(cloudTodos);
+
+      setTodos(prevLocal => {
+        const localMap = new Map(prevLocal.map(t => [t.id, t]));
+        const merged: Todo[] = [];
+        const processedIds = new Set<string>();
+
+        // 1. 遍历云端数据，决定是否采纳
+        for (const cTodo of cloudTodos) {
+          processedIds.add(cTodo.id);
+          const lTodo = localMap.get(cTodo.id);
+
+          // 检查该 ID 是否有本地待同步的修改
+          const isPendingSync = syncQueue.some(a => a.id === cTodo.id);
+
+          if (!lTodo) {
+            // 云端有，本地没有
+            // 检查：是否是本地刚刚删除但还没同步上去？(队列里有 DELETE)
+            const isPendingDelete = syncQueue.some(a => a.id === cTodo.id && a.type === 'DELETE');
+            if (!isPendingDelete) {
+              merged.push(cTodo); // 确实是新数据，加入
+            }
+          } else {
+            // 两边都有
+            if (isPendingSync) {
+              // 本地有修改没上传，保留本地版本（相信离线操作）
+              merged.push(lTodo);
+            } else {
+              // 都没有未决修改，比较时间戳（谁新听谁的）
+              const localTime = lTodo.updatedAt || 0;
+              const cloudTime = cTodo.updatedAt || 0;
+              merged.push(cloudTime > localTime ? cTodo : lTodo);
+            }
+          }
+        }
+
+        // 2. 遍历本地数据，寻找云端没有的数据
+        for (const lTodo of prevLocal) {
+          if (!processedIds.has(lTodo.id)) {
+            // 本地有，云端没有
+            // 检查：是否是本地新建还没上传？(队列里有 INSERT)
+            const isPendingInsert = syncQueue.some(a => a.id === lTodo.id && a.type === 'INSERT');
+            
+            if (isPendingInsert) {
+              merged.push(lTodo); // 保留未上传的新建项
+            }
+            // 否则：说明云端已经删除了该项，本地也应该删除（不加入 merged）
+          }
+        }
+
+        return merged;
+      });
     }
   };
 
   // 实时订阅
+  // 简化策略：收到任何变更通知，触发一次智能 fetchTodos，利用上面的合并逻辑处理
   useEffect(() => {
     if (!session) return;
     const channel = supabase.channel('todos-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, (payload) => {
-        const { eventType, new: newRec, old: oldRec } = payload as any;
-        if (eventType === 'INSERT') {
-          setTodos(prev => {
-            if (prev.some(t => t.id === newRec.id)) return prev;
-            return [...prev, {
-              id: newRec.id,
-              text: newRec.text,
-              completed: newRec.completed,
-              targetDate: newRec.target_date,
-              createdAt: newRec.created_at ? new Date(newRec.created_at).getTime() : Date.now()
-            }];
-          });
-        } else if (eventType === 'UPDATE') {
-          setTodos(prev => prev.map(t => t.id === newRec.id ? {
-            ...t,
-            text: newRec.text,
-            completed: newRec.completed,
-            targetDate: newRec.target_date,
-            // 同步更新完成时间
-            completedAt: newRec.completed_at ? new Date(newRec.completed_at).getTime() : t.completedAt
-          } : t));
-        } else if (eventType === 'DELETE') {
-          setTodos(prev => prev.filter(t => t.id !== oldRec.id));
-        }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, () => {
+        fetchTodos();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [session]);
+  }, [session, syncQueue]); // 依赖 syncQueue 以确保 fetchTodos 闭包拿到最新队列
 
   // --- 窗口逻辑 ---
 
@@ -290,7 +404,7 @@ export default function App() {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
   };
 
-  // --- CRUD 操作 (含 Time Stamp) ---
+  // --- [修改] CRUD 操作 (乐观更新 + 队列) ---
 
   const handleAddTodo = async (text: string, dateKey: string) => {
     if (!text.trim()) return;
@@ -302,20 +416,19 @@ export default function App() {
       text, 
       completed: false, 
       targetDate: dateKey,
-      createdAt: nowTs // 记录创建时间
+      createdAt: nowTs,
+      updatedAt: nowTs // 设置初始更新时间
     };
     
+    // 1. 乐观更新本地
     setTodos(prev => [...prev, newTodo]);
 
+    // 2. 加入同步队列
     if (session) {
-      const { error } = await supabase.from('todos').insert({
-        id,
-        text,
-        target_date: dateKey,
-        completed: false,
-        created_at: new Date(nowTs).toISOString() // 假设数据库支持
-      });
-      if (error) console.error('Add failed:', error);
+      const action: SyncAction = { id, type: 'INSERT', payload: newTodo, timestamp: nowTs };
+      setSyncQueue(prev => [...prev, action]);
+      // 触发一次处理（如果是联网状态会立即发送）
+      setTimeout(() => processSyncQueue(), 0);
     }
   };
 
@@ -330,60 +443,79 @@ export default function App() {
     const nowTs = Date.now();
     const completedAt = isNowCompleted ? nowTs : undefined;
 
+    // 1. 乐观更新
     setTodos(prev => prev.map(t => t.id === id ? { 
       ...t, 
       completed: isNowCompleted, 
       targetDate: newDate,
-      completedAt // 更新完成时间
+      completedAt,
+      updatedAt: nowTs // 更新时间戳
     } : t));
 
+    // 2. 加入队列
     if (session) {
-      const { error } = await supabase.from('todos').update({
-        completed: isNowCompleted,
-        target_date: newDate,
-        completed_at: isNowCompleted ? new Date(nowTs).toISOString() : null
-      }).eq('id', id);
-      if (error) console.error('Toggle failed:', error);
+      const action: SyncAction = { 
+        id, 
+        type: 'UPDATE', 
+        payload: { completed: isNowCompleted, targetDate: newDate }, 
+        timestamp: nowTs 
+      };
+      setSyncQueue(prev => [...prev, action]);
+      setTimeout(() => processSyncQueue(), 0);
     }
   };
 
   const handleDeleteTodo = async (id: string) => {
+    // 1. 乐观更新
     setTodos(prev => prev.filter(t => t.id !== id));
+    
+    // 2. 加入队列
     if (session) {
-      const { error } = await supabase.from('todos').delete().eq('id', id);
-      if (error) console.error('Delete failed:', error);
+      const action: SyncAction = { id, type: 'DELETE', payload: id, timestamp: Date.now() };
+      setSyncQueue(prev => [...prev, action]);
+      setTimeout(() => processSyncQueue(), 0);
     }
   };
 
   const handleUpdateTodoText = async (id: string, newText: string) => {
     if (!newText.trim()) return;
-    setTodos(prev => prev.map(t => t.id === id ? { ...t, text: newText } : t));
+    const nowTs = Date.now();
     
+    // 1. 乐观更新
+    setTodos(prev => prev.map(t => t.id === id ? { ...t, text: newText, updatedAt: nowTs } : t));
+    
+    // 2. 加入队列
     if (session) {
-      const { error } = await supabase.from('todos').update({ text: newText }).eq('id', id);
-      if (error) console.error('Update text failed:', error);
+      const action: SyncAction = { id, type: 'UPDATE', payload: { text: newText }, timestamp: nowTs };
+      setSyncQueue(prev => [...prev, action]);
+      setTimeout(() => processSyncQueue(), 0);
     }
   };
 
-  // 批量导入逻辑
+  // [修改] 批量导入逻辑也需要走队列，防止被 fetchTodos 的合并逻辑误删
   const handleBatchImport = async (importedTodos: Todo[]) => {
     const existingIds = new Set(todos.map(t => t.id));
     const newTodos = importedTodos.filter(t => !existingIds.has(t.id));
     if (newTodos.length === 0) return;
 
-    setTodos(prev => [...prev, ...newTodos]);
+    const nowTs = Date.now();
+    const preparedTodos = newTodos.map(t => ({
+        ...t,
+        updatedAt: t.updatedAt || nowTs // 确保有 updatedAt
+    }));
+
+    setTodos(prev => [...prev, ...preparedTodos]);
 
     if (session) {
-      const dbRows = newTodos.map(t => ({
-        id: t.id,
-        text: t.text,
-        completed: t.completed,
-        target_date: t.targetDate,
-        created_at: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
-        completed_at: t.completedAt ? new Date(t.completedAt).toISOString() : null
-      }));
-      const { error } = await supabase.from('todos').insert(dbRows);
-      if (error) console.error('Batch import sync failed:', error);
+        // 批量生成 INSERT 动作
+        const actions: SyncAction[] = preparedTodos.map(t => ({
+            id: t.id,
+            type: 'INSERT',
+            payload: t,
+            timestamp: nowTs
+        }));
+        setSyncQueue(prev => [...prev, ...actions]);
+        setTimeout(() => processSyncQueue(), 0);
     }
   };
 
