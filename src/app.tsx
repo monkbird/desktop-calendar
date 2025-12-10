@@ -793,18 +793,24 @@ export default function App() {
         )}
       </div>
 
-      <InteractiveTooltip 
-        targetRect={hoverRect}
-        containerSize={winSize}
-        tasks={hoverState ? getTasksForDate(hoverState.dateKey) : []}
-        dateKey={hoverState ? hoverState.dateKey : todayKey}
-        onMouseEnter={keepTooltipOpen}
-        onMouseLeave={handleMouseLeaveAnywhere}
-        onAddTodo={handleAddTodo}
-        onToggleTodo={handleToggleTodo}
-        onDeleteTodo={handleDeleteTodo}
-        onUpdateTodoText={handleUpdateTodoText}
-      />
+      {/* 【修改】增加 hoverRect && 判断
+         只有当 hoverRect 存在时才渲染组件，确保 InteractiveTooltip 内部 Hooks 
+         是在组件挂载时运行，而不是在更新时突然出现。
+      */}
+      {hoverRect && (
+        <InteractiveTooltip 
+          targetRect={hoverRect}
+          containerSize={winSize}
+          tasks={hoverState ? getTasksForDate(hoverState.dateKey) : []}
+          dateKey={hoverState ? hoverState.dateKey : todayKey}
+          onMouseEnter={keepTooltipOpen}
+          onMouseLeave={handleMouseLeaveAnywhere}
+          onAddTodo={handleAddTodo}
+          onToggleTodo={handleToggleTodo}
+          onDeleteTodo={handleDeleteTodo}
+          onUpdateTodoText={handleUpdateTodoText}
+        />
+      )}
 
       <HistoryModal 
         isOpen={isHistoryOpen} 
