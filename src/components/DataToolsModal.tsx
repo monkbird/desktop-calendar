@@ -10,16 +10,15 @@ interface DataToolsModalProps {
   onImport: (newTodos: Todo[]) => Promise<void>;
 }
 
-// 对应截图中的 Excel 行结构
+// 定义 Excel 行结构
 interface ExcelRow {
   '清单名称': string;
-  '计划日期': string; // YYYY-MM-DD
+  '计划日期': string | number;
   '待办内容': string;
   '优先级': string;
-  '状态': string;     // 未完成 | 已完成
-  '完成时间': string;
-  '创建时间': string;
-  // 如果 Excel 里有 '计划时间' 列，这里可以扩展，但目前 Todo 类型只支持 targetDate
+  '状态': string;
+  '完成时间': Date | string | number | null;
+  '创建时间': Date | string | number;
 }
 
 export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsModalProps) => {
@@ -29,45 +28,52 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
 
   if (!isOpen) return null;
 
-  // 格式化时间戳为 YYYY-MM-DD HH:mm:ss
-  const formatTime = (timestamp?: number) => {
-    if (!timestamp) return '';
-    const d = new Date(timestamp);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  };
-
   // --- 导出逻辑 ---
   const handleExport = () => {
     try {
-      // 1. 将 Todo 数据转换为 Excel 行格式
-      const rows: ExcelRow[] = todos.map(todo => ({
+      // 1. 转换数据
+      const rows = todos.map(todo => ({
         '清单名称': '默认清单',
         '计划日期': todo.targetDate,
         '待办内容': todo.text,
         '优先级': '无', 
         '状态': todo.completed ? '已完成' : '未完成',
-        '完成时间': formatTime(todo.completedAt),
-        '创建时间': formatTime(todo.createdAt || Date.now())
+        // 传递 Date 对象，让 Excel 处理
+        '完成时间': todo.completedAt ? new Date(todo.completedAt) : null,
+        '创建时间': new Date(todo.createdAt || Date.now())
       }));
 
-      // 2. 创建工作簿
+      // 2. 创建工作表
       const worksheet = XLSX.utils.json_to_sheet(rows);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "待办事项");
 
-      // 3. 调整列宽
+      // 3. 设置列宽
       worksheet['!cols'] = [
         { wch: 15 }, // 清单名称
         { wch: 12 }, // 计划日期
         { wch: 40 }, // 待办内容
         { wch: 8 },  // 优先级
         { wch: 8 },  // 状态
-        { wch: 20 }, // 完成时间
-        { wch: 20 }, // 创建时间
+        { wch: 18 }, // 完成时间 (缩短一点，因为不显示秒了)
+        { wch: 18 }, // 创建时间
       ];
 
-      // 4. 下载文件
+      // 4. [修改] 设置时间列格式为 "yyyy-mm-dd hh:mm" (不含秒)
+      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+      for (let R = range.s.r + 1; R <= range.e.r; ++R) { // 跳过表头
+        const fmt = 'yyyy-mm-dd hh:mm'; // <--- 修改这里：去掉了 :ss
+        
+        // F列 (索引5) = 完成时间
+        const cellF = worksheet[XLSX.utils.encode_cell({ r: R, c: 5 })];
+        if (cellF) cellF.z = fmt;
+
+        // G列 (索引6) = 创建时间
+        const cellG = worksheet[XLSX.utils.encode_cell({ r: R, c: 6 })];
+        if (cellG) cellG.z = fmt;
+      }
+
+      // 5. 下载
       const fileName = `DesktopCalendar_Export_${new Date().toISOString().split('T')[0]}.xlsx`;
       XLSX.writeFile(workbook, fileName);
 
@@ -79,17 +85,44 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
     }
   };
 
-  // 辅助函数：尝试解析各种奇怪的日期格式
-  const parseDateStr = (val: any): number | undefined => {
+  // --- 导入逻辑 (保持修复后的版本) ---
+
+  const excelSerialToTimestamp = (serial: number) => {
+    const utcMs = (serial - 25569) * 86400000;
+    const offsetMs = new Date().getTimezoneOffset() * 60 * 1000; 
+    return utcMs + offsetMs;
+  };
+
+  const parseDateTime = (val: any): number | undefined => {
     if (!val) return undefined;
-    // 如果已经是数字（时间戳）
-    if (typeof val === 'number') return val; // 注意：Excel 序列号需要额外处理，这里假设是时间戳或 XLSX 已转换
-    // 尝试字符串解析
+    if (typeof val === 'number') {
+      if (val < 1000000) return excelSerialToTimestamp(val); // 处理 Excel 序列号
+      return val; 
+    }
     const t = new Date(val).getTime();
     return isNaN(t) ? undefined : t;
   };
 
-  // --- 导入逻辑 ---
+  const parseDateString = (val: any): string => {
+    if (!val) return new Date().toISOString().split('T')[0];
+    if (typeof val === 'number') {
+       const date = new Date((val - 25569) * 86400000);
+       const y = date.getUTCFullYear();
+       const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+       const d = String(date.getUTCDate()).padStart(2, '0');
+       return `${y}-${m}-${d}`;
+    }
+    const str = String(val).trim();
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+       const y = d.getFullYear();
+       const m = String(d.getMonth() + 1).padStart(2, '0');
+       const da = String(d.getDate()).padStart(2, '0');
+       return `${y}-${m}-${da}`;
+    }
+    return str;
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -101,59 +134,46 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
       try {
         const data = event.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
-        
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         
-        // 转换为 JSON
-        const jsonRows = XLSX.utils.sheet_to_json<ExcelRow>(worksheet);
+        const jsonRows = XLSX.utils.sheet_to_json<ExcelRow>(worksheet, { raw: true });
 
         if (!Array.isArray(jsonRows)) {
           setMsg('错误：文件格式无法识别');
           return;
         }
 
-        // [优化] 预先建立现有任务的指纹库 (内容 + 日期)，用于去重
         const existingFingerprints = new Set(
           todos.map(t => `${t.text}|${t.targetDate}`)
         );
 
         let duplicateCount = 0;
-
-        // 将 Excel 行转换回 Todo 格式
         const newTodos: Todo[] = [];
         
         for (const row of jsonRows) {
-          // 1. 基础数据清洗
           const text = (row['待办内容'] || '').trim();
-          if (!text) continue; // 跳过空行
+          if (!text) continue; 
 
-          // 2. 日期清洗
-          let safeTargetDate = new Date().toISOString().split('T')[0];
-          if (row['计划日期']) {
-             safeTargetDate = String(row['计划日期']).trim();
-          }
+          const safeTargetDate = parseDateString(row['计划日期']);
 
-          // 3. [核心修复] 去重检查
-          // 如果系统中已经有 内容和日期 完全一致的任务，则跳过
           if (existingFingerprints.has(`${text}|${safeTargetDate}`)) {
             duplicateCount++;
             continue;
           }
 
           const isCompleted = row['状态'] === '已完成' || row['状态'] === '完成';
-          
-          // 4. [核心修复] 更强壮的时间解析
-          const completedAt = isCompleted ? parseDateStr(row['完成时间']) : undefined;
-          const createdAt = parseDateStr(row['创建时间']) || Date.now();
+          const completedAt = isCompleted ? parseDateTime(row['完成时间']) : undefined;
+          const createdAt = parseDateTime(row['创建时间']) || Date.now();
 
           newTodos.push({
-            id: crypto.randomUUID(), // 只有新任务才生成新 ID
+            id: crypto.randomUUID(),
             text: text,
             targetDate: safeTargetDate,
             completed: isCompleted,
             completedAt: completedAt,
-            createdAt: createdAt
+            createdAt: createdAt,
+            updatedAt: Date.now()
           });
         }
 
@@ -226,7 +246,7 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
             />
             <p className="text-[10px] text-slate-500 text-center mt-1 flex items-center justify-center gap-1">
               <AlertTriangle size={10} className="text-yellow-500" />
-              自动去重 (按内容+日期)
+              兼容日期字符串和 Excel 时间格式
             </p>
           </div>
         </div>
