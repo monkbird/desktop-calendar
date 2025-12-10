@@ -688,6 +688,25 @@ export default function App() {
             >
               <History size={14} />
             </button>
+
+
+            {/* --- 👇 临时添加的清空按钮 (开始) 👇 --- */}
+             <button 
+               onClick={() => {
+                 if (confirm('确定要清空所有本地数据吗？（仅用于测试导入）')) {
+                   localStorage.removeItem('desktop-todos-v8');
+                   localStorage.removeItem('desktop-sync-queue');
+                   location.reload();
+                 }
+               }} 
+               className="p-1.5 rounded hover:bg-red-500/20 text-red-500 transition-colors font-bold text-xs"
+               title="清空重置"
+             >
+               清空
+             </button>
+             {/* --- 👆 临时添加的清空按钮 (结束) 👆 --- */}
+
+
             <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
             <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400'}`}>
               {isLocked ? <Lock size={14} /> : <Unlock size={14} />}

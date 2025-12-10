@@ -11,17 +11,22 @@ interface HistoryModalProps {
 }
 
 export const HistoryModal = ({ isOpen, onClose, todos, onToggleTodo, onDeleteTodo }: HistoryModalProps) => {
-  if (!isOpen) return null;
-
-  // 获取已完成的任务并按时间倒序排列
+  // 1. 获取已完成的任务并按时间倒序排列
+  // 将 useMemo 提到 if 之前，符合 React Hook 规范，避免潜在报错
   const historyGroups = useMemo(() => {
     const completed = todos.filter(t => t.completed);
     
     // 按月份分组
     const groups: Record<string, Todo[]> = {};
+    
+    // [修复1] 增加数据安全性检查，防止 targetDate 为空或非字符串导致崩溃
     completed.forEach(t => {
-      // targetDate 格式为 YYYY-MM-DD，截取前7位即 YYYY-MM
-      const month = t.targetDate.slice(0, 7); 
+      // 确保 targetDate 是字符串，如果无效则使用空字符串
+      const dateStr = typeof t.targetDate === 'string' ? t.targetDate : String(t.targetDate || '');
+      
+      // 只有日期格式足够长才截取前7位(YYYY-MM)，否则归类到 '未知日期'
+      const month = dateStr.length >= 7 ? dateStr.slice(0, 7) : '未知日期';
+      
       if (!groups[month]) groups[month] = [];
       groups[month].push(t);
     });
@@ -31,10 +36,17 @@ export const HistoryModal = ({ isOpen, onClose, todos, onToggleTodo, onDeleteTod
       .sort((a, b) => b.localeCompare(a))
       .map(month => ({
         month,
-        // 组内任务按日期倒序
-        tasks: groups[month].sort((a, b) => b.targetDate.localeCompare(a.targetDate))
+        // [修复2] 这里的 sort 也要加防护！先转成字符串再比较，防止脏数据导致 localeCompare 报错
+        tasks: groups[month].sort((a, b) => {
+          const dateA = String(a.targetDate || '');
+          const dateB = String(b.targetDate || '');
+          return dateB.localeCompare(dateA);
+        })
       }));
   }, [todos]);
+
+  // 2. 如果不显示，直接返回 null
+  if (!isOpen) return null;
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -74,9 +86,9 @@ export const HistoryModal = ({ isOpen, onClose, todos, onToggleTodo, onDeleteTod
                 <div className="space-y-1">
                   {group.tasks.map(task => (
                     <div key={task.id} className="group flex items-start gap-3 p-2 rounded-lg bg-white/[0.03] hover:bg-white/5 transition-colors border border-transparent hover:border-white/5">
-                      {/* 日期 Badge */}
+                      {/* 日期 Badge - 这里显示时也要防错，虽然逻辑上已经处理过 */}
                       <div className="mt-0.5 px-1.5 py-0.5 rounded text-[10px] bg-white/5 text-slate-500 font-mono flex-shrink-0">
-                        {task.targetDate.slice(8)}日
+                        {String(task.targetDate || '').length >= 10 ? String(task.targetDate).slice(8) : '??'}日
                       </div>
                       
                       {/* 任务文本 */}

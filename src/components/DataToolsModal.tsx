@@ -19,6 +19,7 @@ interface ExcelRow {
   '状态': string;     // 未完成 | 已完成
   '完成时间': string;
   '创建时间': string;
+  // 如果 Excel 里有 '计划时间' 列，这里可以扩展，但目前 Todo 类型只支持 targetDate
 }
 
 export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsModalProps) => {
@@ -41,13 +42,13 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
     try {
       // 1. 将 Todo 数据转换为 Excel 行格式
       const rows: ExcelRow[] = todos.map(todo => ({
-        '清单名称': '默认清单', // 目前系统没有清单概念，暂固定
+        '清单名称': '默认清单',
         '计划日期': todo.targetDate,
         '待办内容': todo.text,
-        '优先级': '中', // 目前系统没有优先级概念，暂固定
+        '优先级': '无', 
         '状态': todo.completed ? '已完成' : '未完成',
         '完成时间': formatTime(todo.completedAt),
-        '创建时间': formatTime(todo.createdAt || Date.now()) // 兼容旧数据
+        '创建时间': formatTime(todo.createdAt || Date.now())
       }));
 
       // 2. 创建工作簿
@@ -55,7 +56,7 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "待办事项");
 
-      // 3. 调整列宽 (可选优化)
+      // 3. 调整列宽
       worksheet['!cols'] = [
         { wch: 15 }, // 清单名称
         { wch: 12 }, // 计划日期
@@ -78,6 +79,16 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
     }
   };
 
+  // 辅助函数：尝试解析各种奇怪的日期格式
+  const parseDateStr = (val: any): number | undefined => {
+    if (!val) return undefined;
+    // 如果已经是数字（时间戳）
+    if (typeof val === 'number') return val; // 注意：Excel 序列号需要额外处理，这里假设是时间戳或 XLSX 已转换
+    // 尝试字符串解析
+    const t = new Date(val).getTime();
+    return isNaN(t) ? undefined : t;
+  };
+
   // --- 导入逻辑 ---
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -91,7 +102,6 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
         const data = event.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
         
-        // 读取第一个 sheet
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         
@@ -103,39 +113,60 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
           return;
         }
 
+        // [优化] 预先建立现有任务的指纹库 (内容 + 日期)，用于去重
+        const existingFingerprints = new Set(
+          todos.map(t => `${t.text}|${t.targetDate}`)
+        );
+
+        let duplicateCount = 0;
+
         // 将 Excel 行转换回 Todo 格式
-        const newTodos: Todo[] = jsonRows.map(row => {
+        const newTodos: Todo[] = [];
+        
+        for (const row of jsonRows) {
+          // 1. 基础数据清洗
+          const text = (row['待办内容'] || '').trim();
+          if (!text) continue; // 跳过空行
+
+          // 2. 日期清洗
+          let safeTargetDate = new Date().toISOString().split('T')[0];
+          if (row['计划日期']) {
+             safeTargetDate = String(row['计划日期']).trim();
+          }
+
+          // 3. [核心修复] 去重检查
+          // 如果系统中已经有 内容和日期 完全一致的任务，则跳过
+          if (existingFingerprints.has(`${text}|${safeTargetDate}`)) {
+            duplicateCount++;
+            continue;
+          }
+
           const isCompleted = row['状态'] === '已完成' || row['状态'] === '完成';
           
-          let completedAt: number | undefined = undefined;
-          if (isCompleted && row['完成时间']) {
-             const t = new Date(row['完成时间']).getTime();
-             if (!isNaN(t)) completedAt = t;
-          }
+          // 4. [核心修复] 更强壮的时间解析
+          const completedAt = isCompleted ? parseDateStr(row['完成时间']) : undefined;
+          const createdAt = parseDateStr(row['创建时间']) || Date.now();
 
-          let createdAt: number | undefined = undefined;
-          if (row['创建时间']) {
-             const t = new Date(row['创建时间']).getTime();
-             if (!isNaN(t)) createdAt = t;
-          }
-
-          return {
-            id: crypto.randomUUID(),
-            text: row['待办内容'] || '未命名事项',
-            targetDate: row['计划日期'] || new Date().toISOString().split('T')[0],
+          newTodos.push({
+            id: crypto.randomUUID(), // 只有新任务才生成新 ID
+            text: text,
+            targetDate: safeTargetDate,
             completed: isCompleted,
             completedAt: completedAt,
-            createdAt: createdAt || Date.now()
-          };
-        }).filter(t => t.text);
+            createdAt: createdAt
+          });
+        }
 
         if (newTodos.length > 0) {
           await onImport(newTodos);
-          setMsg(`成功导入 ${newTodos.length} 条数据`);
+          const dupMsg = duplicateCount > 0 ? ` (已过滤 ${duplicateCount} 条重复)` : '';
+          setMsg(`成功导入 ${newTodos.length} 条数据${dupMsg}`);
           setTimeout(() => {
             setMsg('');
             onClose();
-          }, 1500);
+          }, 2500);
+        } else if (duplicateCount > 0) {
+          setMsg(`未导入：检测到 ${duplicateCount} 条重复数据`);
         } else {
           setMsg('未发现有效的待办数据');
         }
@@ -188,14 +219,14 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
             </button>
             <input 
               type="file" 
-              accept=".xlsx, .xls" 
+              accept=".xlsx, .xls, .csv" 
               ref={fileInputRef} 
               className="hidden" 
               onChange={handleFileChange}
             />
             <p className="text-[10px] text-slate-500 text-center mt-1 flex items-center justify-center gap-1">
               <AlertTriangle size={10} className="text-yellow-500" />
-              将合并现有数据 (自动去重)
+              自动去重 (按内容+日期)
             </p>
           </div>
         </div>

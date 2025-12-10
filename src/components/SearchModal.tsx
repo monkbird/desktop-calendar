@@ -14,15 +14,27 @@ export const SearchModal = ({ isOpen, onClose, todos, onNavigate }: SearchModalP
 
   const filteredTodos = useMemo(() => {
     if (!query.trim()) return [];
+    
     return todos.filter(t => 
-      t.text.toLowerCase().includes(query.toLowerCase())
-    ).sort((a, b) => b.targetDate.localeCompare(a.targetDate));
+      // 增加防护：确保 text 存在且为字符串再调用 toLowerCase
+      (t.text ? String(t.text) : '').toLowerCase().includes(query.toLowerCase())
+    ).sort((a, b) => {
+      // [关键修复] 强制转换为字符串，防止脏数据(如数字)导致 localeCompare 崩溃
+      const dateA = String(a.targetDate || '');
+      const dateB = String(b.targetDate || '');
+      return dateB.localeCompare(dateA);
+    });
   }, [todos, query]);
 
   const handleJump = (dateString: string) => {
+    // 同样增加防护，防止传入非字符串
+    if (typeof dateString !== 'string') return;
+    
     const [y, m, d] = dateString.split('-').map(Number);
-    onNavigate(new Date(y, m - 1, d));
-    onClose();
+    if (y && m && d) {
+        onNavigate(new Date(y, m - 1, d));
+        onClose();
+    }
   };
 
   if (!isOpen) return null;
@@ -57,14 +69,15 @@ export const SearchModal = ({ isOpen, onClose, todos, onNavigate }: SearchModalP
               {filteredTodos.map(todo => (
                 <button
                   key={todo.id}
-                  onClick={() => handleJump(todo.targetDate)}
+                  onClick={() => handleJump(String(todo.targetDate))} // 确保传递给 handleJump 的也是字符串
                   className="w-full text-left p-2 rounded hover:bg-white/5 group flex items-center justify-between transition-colors"
                 >
                   <div className="min-w-0">
                     <div className="text-sm text-slate-200 truncate">{todo.text}</div>
                     <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5 font-mono">
                       <Calendar size={10} />
-                      {todo.targetDate}
+                      {/* 显示时也进行容错处理 */}
+                      {typeof todo.targetDate === 'string' ? todo.targetDate : '未知日期'}
                       {todo.completed && <span className="text-emerald-500 ml-1">✓ 已完成</span>}
                     </div>
                   </div>
