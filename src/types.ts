@@ -7,21 +7,18 @@ export interface Todo {
   targetDate: string; 
   completedAt?: number;
   createdAt?: number;
-  updatedAt?: number; // 新增：用于同步冲突判断
+  updatedAt?: number;
 }
 
-// 新增：同步动作类型
 export type SyncActionType = 'INSERT' | 'UPDATE' | 'DELETE';
 
-// 新增：队列中的单个任务结构
 export interface SyncAction {
-  id: string; // 任务ID
+  id: string;
   type: SyncActionType;
-  payload: Partial<Todo> | string; // 数据体或ID
-  timestamp: number; // 操作产生的时间
+  payload: Partial<Todo> | string;
+  timestamp: number;
 }
 
-// ... 保持 WindowState 等其他定义不变
 export interface WindowState {
   x: number;
   y: number;
@@ -38,10 +35,21 @@ export interface HoverState {
 declare global {
   interface Window {
     desktopCalendar?: {
+      // --- 1. 原有窗口控制 API ---
       version: string;
       resizeWindow: (size: { width: number; height: number }) => void;
       setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;
       setResizable: (resizable: boolean) => void;
+
+      // --- 2. 双窗口通信 API ---
+      showTooltip: (payload: { x: number; y: number; width: number; height: number; data: any }) => void;
+      hideTooltip: () => void;
+      onUpdateTooltip: (cb: (data: any) => void) => () => void;
+      dispatchTooltipAction: (action: { type: string; payload: any }) => void;
+      onTooltipAction: (cb: (action: { type: string; payload: any }) => void) => () => void;
+      
+      // [新增] 子窗口自我调整大小
+      resizeTooltip: (size: { width: number; height: number }) => void;
     };
   }
 }

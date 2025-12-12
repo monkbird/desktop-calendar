@@ -2,31 +2,15 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { 
   Calendar as CalendarIcon, 
-  RotateCcw, 
-  Lock, 
-  Unlock, 
-  Minus, 
-  Square, 
-  ChevronLeft, 
-  ChevronRight, 
-  X, 
-  Check, 
-  Trash2,
-  History,
-  User as UserIcon,
-  Search,
-  Database
+  RotateCcw, Lock, Unlock, Minus, Square, 
+  ChevronLeft, ChevronRight, X, Check, Trash2,
+  History, User as UserIcon, Search, Database
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
-import type { Todo, HoverState, SyncAction } from './types';
+import type { Todo, SyncAction } from './types';
 import { 
-  CHINESE_NUMS, 
-  getDaysInMonth, 
-  getFirstDayOfMonth, 
-  formatDateKey, 
-  getDateInfo 
+  CHINESE_NUMS, getDaysInMonth, getFirstDayOfMonth, formatDateKey, getDateInfo 
 } from './utils';
-import { InteractiveTooltip } from './components/InteractiveTooltip';
 import { CalendarCell } from './components/CalendarCell';
 import { HistoryModal } from './components/HistoryModal'; 
 import { AuthModal } from './components/AuthModal';
@@ -41,7 +25,6 @@ export default function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDataToolsOpen, setIsDataToolsOpen] = useState(false);
 
-  // [新增] 用于测量内容实际高度的 Ref
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Auth 状态
@@ -79,9 +62,7 @@ export default function App() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
-  const [hoverState, setHoverState] = useState<HoverState | null>(null);
-  const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
-  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   const [nowDate, setNowDate] = useState(new Date());
 
   const [modalEditingId, setModalEditingId] = useState<string | null>(null);
@@ -97,19 +78,15 @@ export default function App() {
     localStorage.setItem('desktop-sync-queue', JSON.stringify(syncQueue));
   }, [syncQueue]);
 
-  // --- Supabase Auth & Data Sync ---
-  
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) fetchTodos();
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) fetchTodos();
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -160,17 +137,14 @@ export default function App() {
       }
 
       if (error) {
-        console.warn('Sync failed, keeping in queue:', action, error);
         remainingQueue.push(action); 
       }
     }
-
     setSyncQueue(remainingQueue);
   };
 
   useEffect(() => {
     const handleOnline = () => {
-      console.log('Network online, processing sync queue...');
       processSyncQueue();
       fetchTodos();
     };
@@ -181,10 +155,7 @@ export default function App() {
   const fetchTodos = async () => {
     if (!session) return;
     const { data, error } = await supabase.from('todos').select('*');
-    if (error) {
-      console.error('Fetch error:', error);
-      return;
-    }
+    if (error) return;
 
     if (data) {
       const cloudTodos: Todo[] = data.map(d => ({
@@ -209,13 +180,10 @@ export default function App() {
 
           if (!lTodo) {
             const isPendingDelete = syncQueue.some(a => a.id === cTodo.id && a.type === 'DELETE');
-            if (!isPendingDelete) {
-              merged.push(cTodo); 
-            }
+            if (!isPendingDelete) merged.push(cTodo); 
           } else {
-            if (isPendingSync) {
-              merged.push(lTodo);
-            } else {
+            if (isPendingSync) merged.push(lTodo);
+            else {
               const localTime = lTodo.updatedAt || 0;
               const cloudTime = cTodo.updatedAt || 0;
               merged.push(cloudTime > localTime ? cTodo : lTodo);
@@ -226,12 +194,9 @@ export default function App() {
         for (const lTodo of prevLocal) {
           if (!processedIds.has(lTodo.id)) {
             const isPendingInsert = syncQueue.some(a => a.id === lTodo.id && a.type === 'INSERT');
-            if (isPendingInsert) {
-              merged.push(lTodo); 
-            }
+            if (isPendingInsert) merged.push(lTodo); 
           }
         }
-
         return merged;
       });
     }
@@ -261,8 +226,6 @@ export default function App() {
   useEffect(() => {
     window.desktopCalendar?.setResizable?.(!isLocked);
   }, [isLocked]);
-
-  // 注意：原先这里的 resizeWindow 逻辑已被移除，由下方的 useLayoutEffect 接管
 
   useEffect(() => {
     const now = new Date();
@@ -294,13 +257,10 @@ export default function App() {
       if (isResizing && !isCollapsed) {
         const newWidth = Math.max(320, e.clientX);
         const newHeight = Math.max(300, e.clientY);
-        // 拖拽时直接调整，测量逻辑会在松手或渲染后自动修正高度
         window.desktopCalendar?.resizeWindow({ width: newWidth, height: newHeight });
       }
     };
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
+    const handleMouseUp = () => setIsResizing(false);
     if (isResizing) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
@@ -333,65 +293,16 @@ export default function App() {
     });
   };
 
-  const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    if (isResizing) return;
-
-    const tasks = getTasksForDate(dateKey);
-    if (tasks.length === 0) {
-      setHoverState(null);
-      setHoverRect(null);
-      return;
-    }
-
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setHoverRect(rect);
-    const tooltipW = 240; 
-    const tooltipH = 220; 
-    const gap = 5;
-
-    let x = rect.right + gap;
-    if (x + tooltipW > winSize.width) x = rect.left - tooltipW - gap;
-    if (x < 0) x = Math.max(0, winSize.width - tooltipW - gap);
-
-    let y = rect.top;
-    if (y + tooltipH > winSize.height) y = Math.max(0, winSize.height - tooltipH - gap);
-
-    if (hoverState?.dateKey !== dateKey) {
-        setHoverState(() => ({ dateKey, x, y, targetRect: rect } as HoverState));
-    }
-  };
-
-  const handleMouseLeaveAnywhere = () => {
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    hoverTimeoutRef.current = setTimeout(() => {
-        setHoverState(null);
-        setHoverRect(null);
-    }, 300);
-  };
-
-  const keepTooltipOpen = () => {
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-  };
-
   // --- CRUD 操作 ---
 
   const handleAddTodo = async (text: string, dateKey: string) => {
     if (!text.trim()) return;
     const id = crypto.randomUUID();
     const nowTs = Date.now();
-    
     const newTodo: Todo = { 
-      id, 
-      text, 
-      completed: false, 
-      targetDate: dateKey,
-      createdAt: nowTs,
-      updatedAt: nowTs 
+      id, text, completed: false, targetDate: dateKey, createdAt: nowTs, updatedAt: nowTs 
     };
-    
     setTodos(prev => [...prev, newTodo]);
-
     if (session) {
       const action: SyncAction = { id, type: 'INSERT', payload: newTodo, timestamp: nowTs };
       setSyncQueue(prev => [...prev, action]);
@@ -402,28 +313,18 @@ export default function App() {
   const handleToggleTodo = async (id: string) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
-
     const isNowCompleted = !todo.completed;
     let newDate = todo.targetDate;
     if (isNowCompleted && todo.targetDate < todayKey) newDate = todayKey;
-
     const nowTs = Date.now();
-    const completedAt = isNowCompleted ? nowTs : undefined;
-
+    
     setTodos(prev => prev.map(t => t.id === id ? { 
-      ...t, 
-      completed: isNowCompleted, 
-      targetDate: newDate,
-      completedAt,
-      updatedAt: nowTs 
+      ...t, completed: isNowCompleted, targetDate: newDate, completedAt: isNowCompleted ? nowTs : undefined, updatedAt: nowTs 
     } : t));
 
     if (session) {
       const action: SyncAction = { 
-        id, 
-        type: 'UPDATE', 
-        payload: { completed: isNowCompleted, targetDate: newDate }, 
-        timestamp: nowTs 
+        id, type: 'UPDATE', payload: { completed: isNowCompleted, targetDate: newDate }, timestamp: nowTs 
       };
       setSyncQueue(prev => [...prev, action]);
       setTimeout(() => processSyncQueue(), 0);
@@ -432,7 +333,6 @@ export default function App() {
 
   const handleDeleteTodo = async (id: string) => {
     setTodos(prev => prev.filter(t => t.id !== id));
-    
     if (session) {
       const action: SyncAction = { id, type: 'DELETE', payload: id, timestamp: Date.now() };
       setSyncQueue(prev => [...prev, action]);
@@ -443,35 +343,24 @@ export default function App() {
   const handleUpdateTodoText = async (id: string, newText: string) => {
     if (!newText.trim()) return;
     const nowTs = Date.now();
-    
     setTodos(prev => prev.map(t => t.id === id ? { ...t, text: newText, updatedAt: nowTs } : t));
-    
     if (session) {
       const action: SyncAction = { id, type: 'UPDATE', payload: { text: newText }, timestamp: nowTs };
       setSyncQueue(prev => [...prev, action]);
       setTimeout(() => processSyncQueue(), 0);
     }
   };
-
+  
   const handleBatchImport = async (importedTodos: Todo[]) => {
     const existingIds = new Set(todos.map(t => t.id));
     const newTodos = importedTodos.filter(t => !existingIds.has(t.id));
     if (newTodos.length === 0) return;
-
     const nowTs = Date.now();
-    const preparedTodos = newTodos.map(t => ({
-        ...t,
-        updatedAt: t.updatedAt || nowTs 
-    }));
-
+    const preparedTodos = newTodos.map(t => ({ ...t, updatedAt: t.updatedAt || nowTs }));
     setTodos(prev => [...prev, ...preparedTodos]);
-
     if (session) {
         const actions: SyncAction[] = preparedTodos.map(t => ({
-            id: t.id,
-            type: 'INSERT',
-            payload: t,
-            timestamp: nowTs
+            id: t.id, type: 'INSERT', payload: t, timestamp: nowTs
         }));
         setSyncQueue(prev => [...prev, ...actions]);
         setTimeout(() => processSyncQueue(), 0);
@@ -491,8 +380,49 @@ export default function App() {
     }
   };
 
-  const isMiniMode = winSize.width < 500 || winSize.height < 450;
-  
+  // --- 监听 Tooltip 子窗口的操作 ---
+  useEffect(() => {
+    const removeListener = window.desktopCalendar?.onTooltipAction?.((action) => {
+      const { type, payload } = action;
+      if (type === 'ADD') handleAddTodo(payload.text, payload.dateKey);
+      else if (type === 'TOGGLE') handleToggleTodo(payload);
+      else if (type === 'DELETE') handleDeleteTodo(payload);
+      else if (type === 'CX') window.desktopCalendar?.hideTooltip?.();
+    });
+    return () => removeListener?.();
+  }, [todos]); 
+
+  // --- 鼠标交互 ---
+
+  const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
+    if (isResizing) return;
+
+    // 计算位置
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const tasks = getTasksForDate(dateKey);
+
+    // [新增需求] 如果该日期没有待办事项，直接不显示（如果已显示则隐藏）
+    if (tasks.length === 0) {
+      window.desktopCalendar?.hideTooltip?.();
+      return;
+    }
+
+    // 调用 IPC 显示子窗口
+    window.desktopCalendar?.showTooltip?.({
+      x: rect.right,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+      data: { dateKey, tasks }
+    });
+  };
+
+  const handleMouseLeaveAnywhere = () => {};
+
+  const handleAppClick = () => {
+    window.desktopCalendar?.hideTooltip?.();
+  };
+
   // --- 日历生成 ---
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -500,11 +430,12 @@ export default function App() {
   const firstDay = getFirstDayOfMonth(year, month);
   const calendarCells = [];
   
-  // 上个月
   const prevMonthLastDate = new Date(year, month, 0); 
   const prevMonthDaysCount = prevMonthLastDate.getDate();
   const prevMonthYear = prevMonthLastDate.getFullYear();
   const prevMonthIdx = prevMonthLastDate.getMonth();
+
+  const isMiniMode = winSize.width < 500 || winSize.height < 450;
 
   for (let i = 0; i < firstDay; i++) {
     const dayNum = prevMonthDaysCount - firstDay + i + 1;
@@ -532,7 +463,6 @@ export default function App() {
     );
   }
   
-  // 当月
   for (let i = 1; i <= daysInMonth; i++) {
     const d = new Date(year, month, i);
     const dateKey = formatDateKey(d);
@@ -558,7 +488,6 @@ export default function App() {
     );
   }
 
-  // 下个月
   const totalCellsSoFar = calendarCells.length;
   const cellsNeeded = (7 - (totalCellsSoFar % 7)) % 7;
   for (let i = 1; i <= cellsNeeded; i++) {
@@ -586,25 +515,15 @@ export default function App() {
     );
   }
 
-  // --- [新增] 动态高度计算核心逻辑 ---
-  
-  // 1. 计算当前行数，用于触发 useEffect
   const rowCount = calendarCells.length / 7;
-
-  // 2. 动态测量 DOM 高度并调整窗口
   useLayoutEffect(() => {
     if (isCollapsed) {
        window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 48 });
        return;
     }
-
-    // 只有当 DOM 元素存在时才测量
     if (contentRef.current) {
-       // 获取当前内容实际渲染的高度 (h-fit 下 offsetHeight 即为内容高度)
        const actualContentHeight = contentRef.current.offsetHeight;
        const currentWindowHeight = winSize.height;
-
-       // 只有当高度不一致且差异 > 2px 时才调整 (避免浮点数抖动)
        if (Math.abs(currentWindowHeight - actualContentHeight) > 2) {
           window.desktopCalendar?.resizeWindow({ 
              width: winSize.width, 
@@ -613,43 +532,33 @@ export default function App() {
        }
     }
   }, [rowCount, currentDate, isCollapsed, isMiniMode]); 
-  // 注意：不依赖 winSize，防止循环触发
 
   return (
-    <div className="w-full h-full flex flex-col overflow-hidden bg-transparent select-none">
-      
+    <div 
+      onClick={handleAppClick}
+      className="w-full h-full flex flex-col overflow-hidden bg-transparent select-none"
+    >
       <div 
-        ref={contentRef} // [修改] 绑定 ref 用于测量
-        // [修改] 移除 flex-1, 改为 w-full h-fit，让容器高度紧贴内容
+        ref={contentRef} 
         className={`w-full h-fit flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-opacity duration-300
           ${isLocked ? 'border-red-500/30' : 'border-white/10'}
         `}
       >
         {/* --- 标题栏 --- */}
-        <div 
-          className={`h-7.5 flex items-center justify-between px-2 border-b border-white/10 bg-white/5 flex-shrink-0
-            ${isLocked ? '' : 'drag-region'}
-          `}
-        >
+        <div className={`h-7.5 flex items-center justify-between px-2 border-b border-white/10 bg-white/5 flex-shrink-0 ${isLocked ? '' : 'drag-region'}`}>
           <div className="flex items-center gap-2 min-w-0">
             <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
             <span className="text-sm font-medium text-slate-200 truncate">桌面日历</span>
           </div>
 
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
-             {/* 搜索按钮 */}
              <button onClick={() => setIsSearchOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="搜索 (Ctrl+F)">
                <Search size={14} />
              </button>
-
-             {/* 数据工具按钮 */}
              <button onClick={() => setIsDataToolsOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="数据导入/导出">
                <Database size={14} />
              </button>
-
              <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
-
-             {/* 登录按钮 */}
              <div className="relative" onMouseEnter={cancelCloseAccountMenu} onMouseLeave={scheduleCloseAccountMenu}>
                <button 
                  onClick={() => { session ? setShowAccountMenu(v => !v) : setShowAuth(true); }} 
@@ -670,15 +579,9 @@ export default function App() {
                  </div>
                )}
              </div>
-
-             <button 
-              onClick={() => setIsHistoryOpen(true)} 
-              className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors"
-              title="历史清单"
-            >
+             <button onClick={() => setIsHistoryOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="历史清单">
               <History size={14} />
             </button>
-
             <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
             <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400'}`}>
               {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
@@ -710,7 +613,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* [修改] 移除了 h-full, 仅保留 w-full 和 Grid 属性, 配合父容器的 h-fit */}
           <div className="w-full grid grid-cols-7 auto-rows-fr overflow-hidden bg-transparent">
             {calendarCells}
           </div>
@@ -780,21 +682,6 @@ export default function App() {
           </div>
         )}
       </div>
-
-      {hoverRect && (
-        <InteractiveTooltip 
-          targetRect={hoverRect}
-          containerSize={winSize}
-          tasks={hoverState ? getTasksForDate(hoverState.dateKey) : []}
-          dateKey={hoverState ? hoverState.dateKey : todayKey}
-          onMouseEnter={keepTooltipOpen}
-          onMouseLeave={handleMouseLeaveAnywhere}
-          onAddTodo={handleAddTodo}
-          onToggleTodo={handleToggleTodo}
-          onDeleteTodo={handleDeleteTodo}
-          onUpdateTodoText={handleUpdateTodoText}
-        />
-      )}
 
       <HistoryModal 
         isOpen={isHistoryOpen} 
