@@ -17,11 +17,11 @@ const createWindow = () => {
   const isDev = !!process.env.ELECTRON_START_URL
   mainWindow = new BrowserWindow({
     width: 800,
-    height: 550,
-    minWidth: 320,
-    minHeight: 300,
+    height: 500,
+    minWidth: 200,
+    minHeight: 200,
     frame: false,
-    transparent: true,
+    transparent: false,
     alwaysOnTop: false,
     hasShadow: true,
     resizable: true,
