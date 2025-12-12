@@ -4,7 +4,8 @@ import {
   Calendar as CalendarIcon, 
   RotateCcw, Lock, Unlock, Minus, Square, 
   ChevronLeft, ChevronRight, X, Check, Trash2,
-  History, User as UserIcon, Search, Database
+  History, User as UserIcon, Search, Database,
+  ChevronDown // [新增] 下拉图标
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import type { Todo, SyncAction } from './types';
@@ -20,7 +21,10 @@ import { supabase } from './supabase';
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false); // 卷起模式状态
+  const [isHoverExpanded, setIsHoverExpanded] = useState(false); // [新增] 鼠标悬停临时展开状态
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false); // [新增] 标题栏菜单状态
+
   const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDataToolsOpen, setIsDataToolsOpen] = useState(false);
@@ -30,7 +34,7 @@ export default function App() {
   // Auth 状态
   const [session, setSession] = useState<Session | null>(null);
   const [showAuth, setShowAuth] = useState(false);
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false); // 注意：现在主要在下拉菜单里，这个状态可能仅用于弹窗控制
   const accountMenuCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleCloseAccountMenu = () => {
@@ -221,7 +225,10 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [session, syncQueue]);
 
-  // --- 窗口逻辑 ---
+  // --- 窗口逻辑 (关键修改：引入 isEffectivelyOpen) ---
+
+  // 如果没有卷起，或者卷起了但鼠标悬停了，就算作“有效展开”
+  const isEffectivelyOpen = !isCollapsed || isHoverExpanded;
 
   useEffect(() => {
     setWinSize({ width: window.innerWidth, height: window.innerHeight });
@@ -263,7 +270,8 @@ export default function App() {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (isResizing && !isCollapsed) {
+      // 只有在有效展开状态下才允许调整大小
+      if (isResizing && isEffectivelyOpen) {
         const newWidth = Math.max(320, e.clientX);
         const newHeight = Math.max(300, e.clientY);
         window.desktopCalendar?.resizeWindow({ width: newWidth, height: newHeight });
@@ -278,10 +286,10 @@ export default function App() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, isCollapsed]);
+  }, [isResizing, isEffectivelyOpen]); // 依赖更新
 
   const startResize = (e: ReactMouseEvent) => {
-    if (isLocked || isCollapsed) return;
+    if (isLocked || !isEffectivelyOpen) return;
     e.stopPropagation();
     setIsResizing(true);
   };
@@ -396,19 +404,14 @@ export default function App() {
       if (payload && payload.dateKey) {
         setActiveTooltipDate(payload.dateKey);
       }
-      if (payload && payload.dateKey) {
-        setActiveTooltipDate(payload.dateKey);
-      }
 
       if (type === 'ADD') {
         handleAddTodo(payload.text, payload.dateKey);
       } 
       else if (type === 'TOGGLE') {
-        // [修改] payload 现在是对象 { id, dateKey }，取 payload.id
         handleToggleTodo(payload.id); 
       } 
       else if (type === 'DELETE') {
-        // [修改] payload 现在是对象 { id, dateKey }，取 payload.id
         handleDeleteTodo(payload.id); 
       } 
       else if (type === 'CX') {
@@ -421,24 +424,33 @@ export default function App() {
 
   // --- 鼠标交互 ---
 
+  // [新增] 容器层级的鼠标事件，控制展开
+  const handleContainerMouseEnter = () => {
+    if (isCollapsed) {
+      setIsHoverExpanded(true);
+    }
+  };
+
+  const handleContainerMouseLeave = () => {
+    setIsHoverExpanded(false);
+    // 鼠标离开容器时，如果菜单开着，最好也关掉，不然悬浮收起后菜单还在原位会很怪
+    if (isCollapsed) setIsToolsMenuOpen(false);
+  };
+
   const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
     if (isResizing) return;
 
-    // 计算位置
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const tasks = getTasksForDate(dateKey);
 
-    // [新增需求] 如果该日期没有待办事项，直接不显示（如果已显示则隐藏）
     if (tasks.length === 0) {
       window.desktopCalendar?.hideTooltip?.();
       setActiveTooltipDate(null);
       return;
     }
 
-    // 更新当前活跃日期
     setActiveTooltipDate(dateKey);
 
-    // 调用 IPC 显示子窗口
     window.desktopCalendar?.showTooltip?.({
       x: rect.right,
       y: rect.top,
@@ -453,6 +465,7 @@ export default function App() {
   const handleAppClick = () => {
     window.desktopCalendar?.hideTooltip?.();
     setActiveTooltipDate(null);
+    setIsToolsMenuOpen(false); // 点击其他地方关闭菜单
   };
 
   // --- 日历生成 ---
@@ -548,89 +561,112 @@ export default function App() {
   }
 
   const rowCount = calendarCells.length / 7;
+
+  // --- [核心修改] 窗口高度控制 Effect ---
   useLayoutEffect(() => {
-    if (isCollapsed) {
-       window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 48 });
+    // 1. 如果处于“完全卷起”状态（卷起且无悬停），强制高度为标题栏高度 (约 32px)
+    if (!isEffectivelyOpen) {
+       window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 32 });
        return;
     }
+    
+    // 2. 如果处于展开状态（正常模式 或 卷起+悬停），恢复内容高度
     if (contentRef.current) {
        const actualContentHeight = contentRef.current.offsetHeight;
-       const currentWindowHeight = winSize.height;
-       if (Math.abs(currentWindowHeight - actualContentHeight) > 2) {
+       // 这里加一个 check，防止死循环 resize。
+       // 如果窗口当前高度特别小（说明是从卷起切回来的），或者高度差大于阈值，则调整
+       if (winSize.height < 100 || Math.abs(winSize.height - actualContentHeight) > 5) {
           window.desktopCalendar?.resizeWindow({ 
              width: winSize.width, 
              height: actualContentHeight 
           });
        }
     }
-  }, [rowCount, currentDate, isCollapsed, isMiniMode]); 
+  }, [rowCount, currentDate, isCollapsed, isHoverExpanded]); // 依赖加入 isHoverExpanded
 
   return (
     <div 
+      // [核心修改] 绑定鼠标事件到最外层
+      onMouseEnter={handleContainerMouseEnter}
+      onMouseLeave={handleContainerMouseLeave}
       onClick={handleAppClick}
       className="w-full h-full flex flex-col overflow-hidden bg-transparent select-none"
     >
       <div 
         ref={contentRef} 
-        className={`w-full h-fit flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-opacity duration-300
+        className={`w-full h-fit flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-all duration-300
           ${isLocked ? 'border-red-500/30' : 'border-white/10'}
+          ${!isEffectivelyOpen ? 'rounded-b-xl' : ''} 
         `}
       >
-        {/* --- 标题栏 --- */}
-        <div className={`h-7.5 flex items-center justify-between px-2 border-b border-white/10 bg-white/5 flex-shrink-0 ${isLocked ? '' : 'drag-region'}`}>
-          <div className="flex items-center gap-2 min-w-0">
+        {/* --- [UI 重构] 标题栏 --- */}
+        <div className={`h-8 flex items-center justify-between px-3 border-b border-white/10 bg-white/5 flex-shrink-0 relative ${isLocked ? '' : 'drag-region'}`}>
+          
+          {/* 左侧：图标 + 下拉菜单触发器 */}
+          <div className="flex items-center gap-1 min-w-0">
             <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
-            <span className="text-sm font-medium text-slate-200 truncate">桌面日历</span>
+            <button 
+               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); }}
+               className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors no-drag group"
+            >
+               <span className="text-sm font-medium text-slate-200">桌面日历</span>
+               <ChevronDown size={12} className={`text-slate-400 transition-transform duration-200 ${isToolsMenuOpen ? 'rotate-180 text-emerald-400' : 'group-hover:text-emerald-400'}`} />
+            </button>
           </div>
 
+          {/* 右侧：锁定 + 卷起按钮 */}
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
-             <button onClick={() => setIsSearchOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 hover:text-emerald-400 transition-colors" title="搜索 (Ctrl+F)">
-               <Search size={14} />
+             <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400 hover:text-white'}`} title={isLocked ? "解锁窗口" : "锁定位置"}>
+               {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
              </button>
-             <button onClick={() => setIsDataToolsOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 hover:text-emerald-400 transition-colors" title="数据导入/导出">
-               <Database size={14} />
+             <button onClick={() => setIsCollapsed(!isCollapsed)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isCollapsed ? 'text-emerald-400' : 'text-slate-400 hover:text-white'}`} title={isCollapsed ? "展开" : "卷起"}>
+               {/* 卷起时显示 Square (表示还原)，展开时显示 Minus (表示卷起) */}
+               {isCollapsed ? <Square size={14} /> : <Minus size={14} />}
              </button>
-             <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
-             <div className="relative" onMouseEnter={cancelCloseAccountMenu} onMouseLeave={scheduleCloseAccountMenu}>
+          </div>
+
+          {/* --- [新增] 下拉菜单 --- */}
+          {isToolsMenuOpen && (
+            <div className="absolute top-full left-2 mt-1 z-50 bg-[#25262b] border border-white/10 rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[130px] animate-in fade-in slide-in-from-top-2 no-drag">
+               <button onClick={() => { setIsSearchOpen(true); setIsToolsMenuOpen(false); }} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded text-left transition-colors">
+                 <Search size={14} /> 搜索事项
+               </button>
+               <button onClick={() => { setIsDataToolsOpen(true); setIsToolsMenuOpen(false); }} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded text-left transition-colors">
+                 <Database size={14} /> 数据管理
+               </button>
+               <button onClick={() => { setIsHistoryOpen(true); setIsToolsMenuOpen(false); }} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded text-left transition-colors">
+                 <History size={14} /> 历史归档
+               </button>
+               
+               <div className="h-[1px] bg-white/10 my-0.5"></div>
+               
                <button 
-                 onClick={() => { session ? setShowAccountMenu(v => !v) : setShowAuth(true); }} 
-                 className={`p-1.5 rounded hover:bg-white/10 transition-colors ${session ? 'text-emerald-400' : 'text-slate-200'}`}
-                 title={session ? `已同步: ${session.user.email}` : "登录以同步"}
+                 onClick={() => { if (!session) { setShowAuth(true); setIsToolsMenuOpen(false); } }}
+                 className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded text-left transition-colors ${session ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-300 hover:bg-white/10 hover:text-emerald-400'}`}
                >
                  <UserIcon size={14} />
+                 {session ? '已同步' : '登录/注册'}
                </button>
-               {session && showAccountMenu && (
-                 <div className="absolute right-0 top-6 z-50 w-36 bg-[#1a1b1e] border border-white/10 rounded shadow-2xl">
-                   <div className="px-3 py-2 text-xs text-slate-200 truncate">{session.user.email}</div>
-                   <button 
-                     onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }}
-                     className="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-white/10"
-                   >
-                     退出登录
-                   </button>
-                 </div>
+               {session && (
+                  <button 
+                    onClick={async () => { await supabase.auth.signOut(); setIsToolsMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-red-400 hover:bg-white/10 rounded text-left transition-colors mt-1"
+                  >
+                    退出登录
+                  </button>
                )}
-             </div>
-             <button onClick={() => setIsHistoryOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 hover:text-emerald-400 transition-colors" title="历史清单">
-              <History size={14} />
-            </button>
-            <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
-            <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-200'}`}>
-              {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
-            </button>
-            <button onClick={() => setIsCollapsed(!isCollapsed)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 transition-colors">
-              {isCollapsed ? <Square size={14} /> : <Minus size={14} />}
-            </button>
-          </div>
+            </div>
+          )}
         </div>
 
         {/* --- 主体内容 --- */}
-        <div className={`flex-1 flex flex-col min-h-0 relative ${isCollapsed ? 'hidden' : 'block'}`}>
+        {/* 根据 isEffectivelyOpen 控制显隐 */}
+        <div className={`flex-1 flex flex-col min-h-0 relative transition-opacity duration-200 ${isEffectivelyOpen ? 'opacity-100' : 'opacity-0 pointer-events-none h-0'}`}>
           <div className="flex items-center justify-between px-2 py-0.1 bg-white/5 flex-shrink-0">
              <h2 className="text-lg font-light text-white flex items-end gap-1">
                <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
              </h2>
-             <div className="flex gap-1">
+             <div className="flex gap-1 no-drag">
                <button onClick={() => setCurrentDate(new Date())} className="p-1 hover:bg-white/10 rounded text-emerald-400" title="回到今天"><RotateCcw size={14} /></button>
                <div className="flex bg-white/5 rounded">
                  <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="p-1 hover:bg-white/10 rounded-l text-slate-300"><ChevronLeft size={16} /></button>
@@ -661,7 +697,7 @@ export default function App() {
           )}
         </div>
 
-        {/* --- 双击详情弹窗 --- */}
+        {/* --- 双击详情弹窗 (保持不变) --- */}
         {selectedDateKey && !isCollapsed && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
              <div className="w-full max-w-[320px] bg-[#25262b]/90 backdrop-blur border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
