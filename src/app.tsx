@@ -67,6 +67,7 @@ export default function App() {
 
   const [modalEditingId, setModalEditingId] = useState<string | null>(null);
   const [modalEditText, setModalEditText] = useState('');
+  const [activeTooltipDate, setActiveTooltipDate] = useState<string | null>(null);
 
   // --- 同步队列状态 ---
   const [syncQueue, setSyncQueue] = useState<SyncAction[]>(() => {
@@ -77,6 +78,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('desktop-sync-queue', JSON.stringify(syncQueue));
   }, [syncQueue]);
+
+  useEffect(() => {
+    if (activeTooltipDate) {
+      const tasks = getTasksForDate(activeTooltipDate);
+      // 推送新数据，ExternalTooltip 会接收并更新界面
+      window.desktopCalendar?.updateTooltipData?.({ dateKey: activeTooltipDate, tasks });
+    }
+  }, [todos, activeTooltipDate]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -384,10 +393,28 @@ export default function App() {
   useEffect(() => {
     const removeListener = window.desktopCalendar?.onTooltipAction?.((action) => {
       const { type, payload } = action;
-      if (type === 'ADD') handleAddTodo(payload.text, payload.dateKey);
-      else if (type === 'TOGGLE') handleToggleTodo(payload);
-      else if (type === 'DELETE') handleDeleteTodo(payload);
-      else if (type === 'CX') window.desktopCalendar?.hideTooltip?.();
+      if (payload && payload.dateKey) {
+        setActiveTooltipDate(payload.dateKey);
+      }
+      if (payload && payload.dateKey) {
+        setActiveTooltipDate(payload.dateKey);
+      }
+
+      if (type === 'ADD') {
+        handleAddTodo(payload.text, payload.dateKey);
+      } 
+      else if (type === 'TOGGLE') {
+        // [修改] payload 现在是对象 { id, dateKey }，取 payload.id
+        handleToggleTodo(payload.id); 
+      } 
+      else if (type === 'DELETE') {
+        // [修改] payload 现在是对象 { id, dateKey }，取 payload.id
+        handleDeleteTodo(payload.id); 
+      } 
+      else if (type === 'CX') {
+         window.desktopCalendar?.hideTooltip?.();
+         setActiveTooltipDate(null);
+      }
     });
     return () => removeListener?.();
   }, [todos]); 
@@ -404,8 +431,12 @@ export default function App() {
     // [新增需求] 如果该日期没有待办事项，直接不显示（如果已显示则隐藏）
     if (tasks.length === 0) {
       window.desktopCalendar?.hideTooltip?.();
+      setActiveTooltipDate(null);
       return;
     }
+
+    // 更新当前活跃日期
+    setActiveTooltipDate(dateKey);
 
     // 调用 IPC 显示子窗口
     window.desktopCalendar?.showTooltip?.({
@@ -421,6 +452,7 @@ export default function App() {
 
   const handleAppClick = () => {
     window.desktopCalendar?.hideTooltip?.();
+    setActiveTooltipDate(null);
   };
 
   // --- 日历生成 ---

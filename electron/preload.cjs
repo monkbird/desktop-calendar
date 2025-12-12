@@ -9,7 +9,8 @@ contextBridge.exposeInMainWorld('desktopCalendar', {
   // --- Tooltip 通信 ---
   showTooltip: (payload) => ipcRenderer.send('show-tooltip-window', payload),
   hideTooltip: () => ipcRenderer.send('hide-tooltip-window'),
-  
+  updateTooltipData: (data) => ipcRenderer.send('update-tooltip-data-only', data),
+
   // [新增] Tooltip 自适应高度
   resizeTooltip: (size) => ipcRenderer.send('resize-tooltip-window', size),
 

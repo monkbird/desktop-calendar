@@ -47,7 +47,7 @@ declare global {
       onUpdateTooltip: (cb: (data: any) => void) => () => void;
       dispatchTooltipAction: (action: { type: string; payload: any }) => void;
       onTooltipAction: (cb: (action: { type: string; payload: any }) => void) => () => void;
-      
+      updateTooltipData: (data: any) => void;
       // [新增] 子窗口自我调整大小
       resizeTooltip: (size: { width: number; height: number }) => void;
     };

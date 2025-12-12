@@ -165,6 +165,13 @@ ipcMain.on('resize-tooltip-window', (event, { width, height }) => {
   }
 });
 
+// [新增] 监听仅更新数据的请求，不执行 setPosition
+ipcMain.on('update-tooltip-data-only', (event, data) => {
+  if (tooltipWindow && !tooltipWindow.isDestroyed()) {
+    tooltipWindow.webContents.send('update-tooltip-data', data);
+  }
+});
+
 ipcMain.on('show-tooltip-window', (event, { x, y, width, height, data }) => {
   if (!tooltipWindow || !mainWindow) return;
   const winBounds = mainWindow.getBounds();

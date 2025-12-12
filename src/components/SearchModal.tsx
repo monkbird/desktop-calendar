@@ -78,7 +78,11 @@ export const SearchModal = ({ isOpen, onClose, todos, onNavigate }: SearchModalP
                       <Calendar size={10} />
                       {/* 显示时也进行容错处理 */}
                       {typeof todo.targetDate === 'string' ? todo.targetDate : '未知日期'}
-                      {todo.completed && <span className="text-emerald-500 ml-1">✓ 已完成</span>}
+                      {todo.completed ? (
+                        <span className="text-emerald-500 ml-1">✓ 已完成</span>
+                      ) : (
+                        <span className="text-yellow-500 ml-1">○ 未完成</span>
+                      )}
                     </div>
                   </div>
                   <ArrowRight size={14} className="text-slate-600 group-hover:text-emerald-400 opacity-0 group-hover:opacity-100 transition-all" />

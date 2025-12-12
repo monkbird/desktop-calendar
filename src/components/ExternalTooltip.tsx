@@ -7,6 +7,7 @@ export const ExternalTooltip = () => {
   const [data, setData] = useState<{ dateKey: string; tasks: Todo[] } | null>(null);
   const [localInput, setLocalInput] = useState('');
   
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // --- [新增] 2秒无操作自动关闭逻辑 ---
@@ -14,12 +15,15 @@ export const ExternalTooltip = () => {
     let timer: ReturnType<typeof setTimeout>;
 
     const hide = () => {
+      if (isInputFocused) return;
       window.desktopCalendar?.hideTooltip?.();
     };
 
     const resetActivity = () => {
       clearTimeout(timer);
-      timer = setTimeout(hide, 2000); // 2秒无操作则隐藏
+      if (!isInputFocused) {
+        timer = setTimeout(hide, 2000); // 2秒无操作则隐藏
+      }
     };
 
     // 初始启动计时
@@ -38,7 +42,7 @@ export const ExternalTooltip = () => {
       window.removeEventListener('keydown', resetActivity);
       window.removeEventListener('wheel', resetActivity);
     };
-  }, [data]); // 依赖 data，确保每次切换日期时也重置计时
+  }, [data, isInputFocused]); // 依赖 data，确保每次切换日期时也重置计时
 
   useEffect(() => {
     const removeListener = window.desktopCalendar?.onUpdateTooltip((payload) => {
@@ -81,6 +85,8 @@ export const ExternalTooltip = () => {
   const [y, m, d] = dateKey.split('-').map(Number);
   const dateInfo = getDateInfo(new Date(y, m - 1, d));
   const specialDayText = dateInfo.festival || dateInfo.term;
+  const total = tasks.length;
+  const uncompleted = tasks.filter(t => !t.completed).length;
 
   return (
     <div ref={containerRef} className="w-[300px] h-fit p-5 box-border select-none">
@@ -91,6 +97,15 @@ export const ExternalTooltip = () => {
             <span className="text-sm font-bold text-white whitespace-nowrap">{dateKey}</span>
             {specialDayText && <span className="text-[10px] text-emerald-400 truncate">{specialDayText}</span>}
             <span className="text-[10px] text-slate-500 truncate">{dateInfo.fullLunar}</span>
+
+            {/* [新增] 修复点2：统计 Badge UI */}
+            {total > 0 && (
+               <div className="text-[10px] font-mono flex items-center gap-[1px] bg-black/20 px-1.5 py-0.5 rounded ml-2 flex-shrink-0">
+                 <span className="text-slate-300 font-bold">{total}</span>
+                 <span className={uncompleted > 0 ? "text-yellow-400 font-bold" : "text-slate-600"}>/{uncompleted}</span>
+               </div>
+             )}
+
           </div>
           <button onClick={() => sendAction('CX', null)} className="text-slate-500 hover:text-white transition-colors cursor-pointer no-drag">
              <X size={14}/>
@@ -104,13 +119,21 @@ export const ExternalTooltip = () => {
           ) : (
             tasks.map(task => (
               <div key={task.id} className="group flex items-center gap-2 p-1.5 hover:bg-white/5 rounded transition-colors">
-                <button onClick={() => sendAction('TOGGLE', task.id)} className={`flex-shrink-0 ${task.completed ? 'text-emerald-500' : 'text-slate-500 hover:text-emerald-400'}`}>
+                <button 
+                  // [修改] Payload 改为对象，包含 id 和 dateKey
+                  onClick={() => sendAction('TOGGLE', { id: task.id, dateKey: data.dateKey })} 
+                  className={`flex-shrink-0 ${task.completed ? 'text-emerald-500' : 'text-slate-500 hover:text-emerald-400'}`}
+                >
                   {task.completed ? <CheckSquare size={14} /> : <Square size={14} />}
                 </button>
                 <span className={`flex-1 text-xs truncate cursor-default ${task.completed ? 'text-slate-600 line-through' : 'text-slate-300'}`} title={task.text}>
                   {task.text}
                 </span>
-                <button onClick={() => sendAction('DELETE', task.id)} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-opacity">
+                <button 
+                  // [修改] Payload 改为对象，包含 id 和 dateKey
+                  onClick={() => sendAction('DELETE', { id: task.id, dateKey: data.dateKey })} 
+                  className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-opacity"
+                >
                   <Trash2 size={12} />
                 </button>
               </div>
@@ -127,6 +150,8 @@ export const ExternalTooltip = () => {
               placeholder="添加新事项..."
               value={localInput}
               onChange={e => setLocalInput(e.target.value)}
+              onFocus={() => setIsInputFocused(true)}
+              onBlur={() => setIsInputFocused(false)}
             />
             <button type="submit" disabled={!localInput.trim()} className="absolute right-1.5 top-1.5 text-slate-500 hover:text-emerald-500 disabled:hidden">
               <Plus size={14} />
