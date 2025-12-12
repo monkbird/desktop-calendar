@@ -70,7 +70,7 @@ export const CalendarCell: FC<CalendarCellProps> = ({
         {/* --- 右侧：农历/节气/今天标识 --- */}
         <div className="flex flex-col items-end flex-shrink-0 ml-1 min-w-0">
              {isToday && <span className={`bg-emerald-500 text-black font-bold rounded-sm mb-0.5 whitespace-nowrap ${isMiniMode ? 'text-[7px] px-0.5 scale-90 origin-right' : 'text-[10px] px-1'}`}>今</span>}
-             <span className={`truncate text-right ${term ? 'text-emerald-400 font-bold' : 'text-slate-500'} 
+             <span className={`truncate text-right ${term ? 'text-emerald-400 font-bold' : 'text-slate-200'} 
                ${isMiniMode ? 'text-[8px] scale-90 origin-right max-w-[35px]' : 'text-[10px] max-w-[60px]'}
              `}>
                {term || lunar}

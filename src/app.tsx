@@ -584,24 +584,24 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
-             <button onClick={() => setIsSearchOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="搜索 (Ctrl+F)">
+             <button onClick={() => setIsSearchOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 hover:text-emerald-400 transition-colors" title="搜索 (Ctrl+F)">
                <Search size={14} />
              </button>
-             <button onClick={() => setIsDataToolsOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="数据导入/导出">
+             <button onClick={() => setIsDataToolsOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 hover:text-emerald-400 transition-colors" title="数据导入/导出">
                <Database size={14} />
              </button>
              <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
              <div className="relative" onMouseEnter={cancelCloseAccountMenu} onMouseLeave={scheduleCloseAccountMenu}>
                <button 
                  onClick={() => { session ? setShowAccountMenu(v => !v) : setShowAuth(true); }} 
-                 className={`p-1.5 rounded hover:bg-white/10 transition-colors ${session ? 'text-emerald-400' : 'text-slate-400'}`}
+                 className={`p-1.5 rounded hover:bg-white/10 transition-colors ${session ? 'text-emerald-400' : 'text-slate-200'}`}
                  title={session ? `已同步: ${session.user.email}` : "登录以同步"}
                >
                  <UserIcon size={14} />
                </button>
                {session && showAccountMenu && (
                  <div className="absolute right-0 top-6 z-50 w-36 bg-[#1a1b1e] border border-white/10 rounded shadow-2xl">
-                   <div className="px-3 py-2 text-xs text-slate-400 truncate">{session.user.email}</div>
+                   <div className="px-3 py-2 text-xs text-slate-200 truncate">{session.user.email}</div>
                    <button 
                      onClick={async () => { setShowAccountMenu(false); await supabase.auth.signOut(); }}
                      className="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-white/10"
@@ -611,14 +611,14 @@ export default function App() {
                  </div>
                )}
              </div>
-             <button onClick={() => setIsHistoryOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors" title="历史清单">
+             <button onClick={() => setIsHistoryOpen(true)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 hover:text-emerald-400 transition-colors" title="历史清单">
               <History size={14} />
             </button>
             <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
-            <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400'}`}>
+            <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-200'}`}>
               {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
             </button>
-            <button onClick={() => setIsCollapsed(!isCollapsed)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 transition-colors">
+            <button onClick={() => setIsCollapsed(!isCollapsed)} className="p-1.5 rounded hover:bg-white/10 text-slate-200 transition-colors">
               {isCollapsed ? <Square size={14} /> : <Minus size={14} />}
             </button>
           </div>
@@ -641,7 +641,7 @@ export default function App() {
 
           <div className="grid grid-cols-7 border-b border-white/5 bg-black/10 flex-shrink-0">
             {CHINESE_NUMS.slice(0, 7).map((d,i)=>(
-              <div key={i} className="text-[10px] text-slate-500 py-1 text-center">{d}</div>
+              <div key={i} className="text-[10px] text-slate-200 py-1 text-center">{d}</div>
             ))}
           </div>
 
@@ -670,12 +670,12 @@ export default function App() {
                     <div className="text-[10px] text-emerald-400 font-bold">详细编辑模式</div>
                     <div className="text-lg text-white font-medium">{selectedDateKey}</div>
                  </div>
-                 <button onClick={() => setSelectedDateKey(null)} className="p-1 hover:bg-white/10 rounded-full text-slate-400"><X size={16} /></button>
+                 <button onClick={() => setSelectedDateKey(null)} className="p-1 hover:bg-white/10 rounded-full text-slate-200"><X size={16} /></button>
                </div>
                <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
                  {getTasksForDate(selectedDateKey).map(t => (
                    <div key={t.id} className="flex gap-2 items-center p-2 rounded hover:bg-white/5 group bg-black/20">
-                     <button onClick={() => handleToggleTodo(t.id)} className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${t.completed ? 'bg-emerald-600 border-transparent' : 'border-slate-500'}`}>
+                     <button onClick={() => handleToggleTodo(t.id)} className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${t.completed ? 'bg-emerald-600 border-transparent' : 'border-slate-200'}`}>
                         {t.completed && <Check size={8} className="text-white"/>}
                      </button>
                      
@@ -693,7 +693,7 @@ export default function App() {
                        ) : (
                          <span 
                             onClick={() => startModalEdit(t)}
-                            className={`block text-xs break-all cursor-text ${t.completed ? 'text-slate-500 line-through' : 'text-slate-200'}`}
+                            className={`block text-xs break-all cursor-text ${t.completed ? 'text-slate-200 line-through' : 'text-slate-200'}`}
                             title="点击编辑"
                          >
                             {t.text}
@@ -701,7 +701,7 @@ export default function App() {
                        )}
                      </div>
 
-                     <button onClick={() => handleDeleteTodo(t.id)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 flex-shrink-0"><Trash2 size={10}/></button>
+                     <button onClick={() => handleDeleteTodo(t.id)} className="opacity-0 group-hover:opacity-100 text-slate-200 hover:text-red-400 flex-shrink-0"><Trash2 size={10}/></button>
                    </div>
                  ))}
                </div>

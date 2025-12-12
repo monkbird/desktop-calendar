@@ -57,7 +57,7 @@ const createWindow = () => {
     minWidth: 200,
     minHeight: 200,
     frame: false,
-    transparent: false,
+    transparent: true,
     alwaysOnTop: false,
     hasShadow: true,
     resizable: true,
