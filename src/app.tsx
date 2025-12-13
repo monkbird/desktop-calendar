@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { 
   Calendar as CalendarIcon, 
   RotateCcw, Lock, Unlock, Minus, Square, 
   ChevronLeft, ChevronRight, X, Check, Trash2,
   History, User as UserIcon, Search, Database,
-  ChevronDown // [新增] 下拉图标
+  ChevronDown, Sliders 
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import type { Todo, SyncAction } from './types';
@@ -21,9 +21,16 @@ import { supabase } from './supabase';
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false); // 卷起模式状态
-  const [isHoverExpanded, setIsHoverExpanded] = useState(false); // [新增] 鼠标悬停临时展开状态
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false); // [新增] 标题栏菜单状态
+  const [isCollapsed, setIsCollapsed] = useState(false); 
+  const [isHoverExpanded, setIsHoverExpanded] = useState(false); 
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false); 
+
+  // 透明度调节状态
+  const [isOpacityMenuOpen, setIsOpacityMenuOpen] = useState(false);
+  const [bgOpacity, setBgOpacity] = useState(() => {
+    const saved = localStorage.getItem('desktop-bg-opacity');
+    return saved ? parseFloat(saved) : 0.5; 
+  });
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -31,20 +38,13 @@ export default function App() {
 
   const contentRef = useRef<HTMLDivElement>(null);
 
+  // 鼠标追踪与延时收起 Ref
+  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMouseInsideRef = useRef(false);
+
   // Auth 状态
   const [session, setSession] = useState<Session | null>(null);
   const [showAuth, setShowAuth] = useState(false);
-  const [showAccountMenu, setShowAccountMenu] = useState(false); // 注意：现在主要在下拉菜单里，这个状态可能仅用于弹窗控制
-  const accountMenuCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const scheduleCloseAccountMenu = () => {
-    if (accountMenuCloseRef.current) clearTimeout(accountMenuCloseRef.current);
-    accountMenuCloseRef.current = setTimeout(() => setShowAccountMenu(false), 500);
-  };
-  const cancelCloseAccountMenu = () => {
-    if (accountMenuCloseRef.current) clearTimeout(accountMenuCloseRef.current);
-    accountMenuCloseRef.current = null;
-  };
 
   const [winSize, setWinSize] = useState({ width: 800, height: 550 });
   const [isResizing, setIsResizing] = useState(false);
@@ -79,14 +79,29 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  // [新增] 汇总所有弹窗/交互状态。只要这里有一个为 true，就不允许自动收起
+  const isAnyPopupOpen = useMemo(() => {
+    return isToolsMenuOpen || 
+           isOpacityMenuOpen || 
+           !!selectedDateKey || 
+           isHistoryOpen || 
+           isSearchOpen || 
+           isDataToolsOpen || 
+           showAuth || 
+           !!activeTooltipDate; // Tooltip 也是窗口，存在时不能收起
+  }, [isToolsMenuOpen, isOpacityMenuOpen, selectedDateKey, isHistoryOpen, isSearchOpen, isDataToolsOpen, showAuth, activeTooltipDate]);
+
   useEffect(() => {
     localStorage.setItem('desktop-sync-queue', JSON.stringify(syncQueue));
   }, [syncQueue]);
 
   useEffect(() => {
+    localStorage.setItem('desktop-bg-opacity', bgOpacity.toString());
+  }, [bgOpacity]);
+
+  useEffect(() => {
     if (activeTooltipDate) {
       const tasks = getTasksForDate(activeTooltipDate);
-      // 推送新数据，ExternalTooltip 会接收并更新界面
       window.desktopCalendar?.updateTooltipData?.({ dateKey: activeTooltipDate, tasks });
     }
   }, [todos, activeTooltipDate]);
@@ -225,10 +240,45 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [session, syncQueue]);
 
-  // --- 窗口逻辑 (关键修改：引入 isEffectivelyOpen) ---
+  // --- 窗口收起/展开逻辑 (核心修改) ---
 
-  // 如果没有卷起，或者卷起了但鼠标悬停了，就算作“有效展开”
-  const isEffectivelyOpen = !isCollapsed || isHoverExpanded;
+  const isEffectivelyOpen = !isCollapsed || isHoverExpanded || isAnyPopupOpen;
+
+  // 调度收起
+  const scheduleCollapse = () => {
+    if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+    
+    // 2秒后尝试收起
+    collapseTimerRef.current = setTimeout(() => {
+      // 再次检查：如果有弹窗，或者鼠标又回来了，就不收起
+      if (isAnyPopupOpen || isMouseInsideRef.current) return;
+      
+      setIsHoverExpanded(false);
+      // 同时关闭可能还开着的非模态菜单（双重保险）
+      setIsToolsMenuOpen(false);
+      setIsOpacityMenuOpen(false);
+    }, 2000);
+  };
+
+  // 取消收起
+  const cancelCollapse = () => {
+    if (collapseTimerRef.current) {
+      clearTimeout(collapseTimerRef.current);
+      collapseTimerRef.current = null;
+    }
+  };
+
+  // 监听弹窗状态变化：如果弹窗关闭了，且鼠标不在界面内，开始倒计时收起
+  useEffect(() => {
+    if (!isAnyPopupOpen && !isMouseInsideRef.current && isHoverExpanded) {
+      scheduleCollapse();
+    }
+    // 如果弹窗打开了，取消任何 pending 的收起任务
+    if (isAnyPopupOpen) {
+      cancelCollapse();
+    }
+  }, [isAnyPopupOpen, isHoverExpanded]);
+
 
   useEffect(() => {
     setWinSize({ width: window.innerWidth, height: window.innerHeight });
@@ -270,7 +320,6 @@ export default function App() {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      // 只有在有效展开状态下才允许调整大小
       if (isResizing && isEffectivelyOpen) {
         const newWidth = Math.max(320, e.clientX);
         const newHeight = Math.max(300, e.clientY);
@@ -286,7 +335,7 @@ export default function App() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, isEffectivelyOpen]); // 依赖更新
+  }, [isResizing, isEffectivelyOpen]); 
 
   const startResize = (e: ReactMouseEvent) => {
     if (isLocked || !isEffectivelyOpen) return;
@@ -422,19 +471,25 @@ export default function App() {
     return () => removeListener?.();
   }, [todos]); 
 
-  // --- 鼠标交互 ---
+  // --- 鼠标交互 (核心修改) ---
 
-  // [新增] 容器层级的鼠标事件，控制展开
   const handleContainerMouseEnter = () => {
+    isMouseInsideRef.current = true;
+    cancelCollapse();
+    
+    // 如果是卷起状态，移入即展开
     if (isCollapsed) {
       setIsHoverExpanded(true);
     }
   };
 
   const handleContainerMouseLeave = () => {
-    setIsHoverExpanded(false);
-    // 鼠标离开容器时，如果菜单开着，最好也关掉，不然悬浮收起后菜单还在原位会很怪
-    if (isCollapsed) setIsToolsMenuOpen(false);
+    isMouseInsideRef.current = false;
+    
+    // 如果是卷起模式下触发的展开，才需要考虑收起
+    if (isCollapsed && isHoverExpanded) {
+      scheduleCollapse();
+    }
   };
 
   const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
@@ -463,9 +518,11 @@ export default function App() {
   const handleMouseLeaveAnywhere = () => {};
 
   const handleAppClick = () => {
+    // 点击空白处，关闭一些轻量级菜单
     window.desktopCalendar?.hideTooltip?.();
     setActiveTooltipDate(null);
-    setIsToolsMenuOpen(false); // 点击其他地方关闭菜单
+    setIsToolsMenuOpen(false); 
+    setIsOpacityMenuOpen(false); 
   };
 
   // --- 日历生成 ---
@@ -562,19 +619,17 @@ export default function App() {
 
   const rowCount = calendarCells.length / 7;
 
-  // --- [核心修改] 窗口高度控制 Effect ---
+  // --- 窗口高度控制 Effect ---
   useLayoutEffect(() => {
-    // 1. 如果处于“完全卷起”状态（卷起且无悬停），强制高度为标题栏高度 (约 32px)
+    // 1. 如果处于“完全卷起”状态
     if (!isEffectivelyOpen) {
        window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 32 });
        return;
     }
     
-    // 2. 如果处于展开状态（正常模式 或 卷起+悬停），恢复内容高度
+    // 2. 如果处于展开状态
     if (contentRef.current) {
        const actualContentHeight = contentRef.current.offsetHeight;
-       // 这里加一个 check，防止死循环 resize。
-       // 如果窗口当前高度特别小（说明是从卷起切回来的），或者高度差大于阈值，则调整
        if (winSize.height < 100 || Math.abs(winSize.height - actualContentHeight) > 5) {
           window.desktopCalendar?.resizeWindow({ 
              width: winSize.width, 
@@ -582,11 +637,11 @@ export default function App() {
           });
        }
     }
-  }, [rowCount, currentDate, isCollapsed, isHoverExpanded]); // 依赖加入 isHoverExpanded
+  }, [rowCount, currentDate, isCollapsed, isHoverExpanded, isAnyPopupOpen]); 
 
   return (
     <div 
-      // [核心修改] 绑定鼠标事件到最外层
+      // 绑定鼠标事件到最外层
       onMouseEnter={handleContainerMouseEnter}
       onMouseLeave={handleContainerMouseLeave}
       onClick={handleAppClick}
@@ -594,19 +649,29 @@ export default function App() {
     >
       <div 
         ref={contentRef} 
-        className={`w-full h-fit flex flex-col bg-black/30 backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/20 transition-all duration-300
-          ${isLocked ? 'border-red-500/30' : 'border-white/10'}
+        // [核心修改] 动态背景 + 锁定时移除所有框体效果(border, shadow, ring, blur)
+        style={{ backgroundColor: `rgba(0, 0, 0, ${bgOpacity})` }}
+        className={`w-full h-fit flex flex-col transition-all duration-300 rounded-xl overflow-hidden
+          ${isLocked 
+            ? 'border-transparent shadow-none backdrop-blur-none ring-0' 
+            : 'border border-white/10 ring-1 ring-black/20 shadow-2xl backdrop-blur-xl'
+          }
           ${!isEffectivelyOpen ? 'rounded-b-xl' : ''} 
         `}
       >
-        {/* --- [UI 重构] 标题栏 --- */}
-        <div className={`h-8 flex items-center justify-between px-3 border-b border-white/10 bg-white/5 flex-shrink-0 relative ${isLocked ? '' : 'drag-region'}`}>
+        {/* --- 标题栏 --- */}
+        <div 
+          // 确保鼠标移入标题栏也能触发展开
+          onMouseEnter={() => { if (isCollapsed) setIsHoverExpanded(true); }}
+          className={`h-8 flex items-center justify-between px-3 border-b bg-white/5 flex-shrink-0 relative 
+            ${isLocked ? 'border-transparent' : 'border-white/10 drag-region'}`}
+        >
           
           {/* 左侧：图标 + 下拉菜单触发器 */}
           <div className="flex items-center gap-1 min-w-0">
             <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
             <button 
-               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); }}
+               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); setIsOpacityMenuOpen(false); }}
                className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors no-drag group"
             >
                <span className="text-sm font-medium text-slate-200">桌面日历</span>
@@ -614,18 +679,49 @@ export default function App() {
             </button>
           </div>
 
-          {/* 右侧：锁定 + 卷起按钮 */}
+          {/* 右侧：功能按钮区 */}
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
+             {/* 透明度调节按钮 */}
+             <div className="relative">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setIsOpacityMenuOpen(!isOpacityMenuOpen); setIsToolsMenuOpen(false); }}
+                  className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isOpacityMenuOpen ? 'text-emerald-400' : 'text-slate-400 hover:text-white'}`}
+                  title="调节透明度"
+                >
+                  <Sliders size={14} />
+                </button>
+                {/* 透明度调节条弹窗 */}
+                {isOpacityMenuOpen && (
+                  <div 
+                    onClick={(e) => e.stopPropagation()} 
+                    className="absolute top-full right-0 mt-2 p-2 bg-[#25262b] border border-white/10 rounded-lg w-32 shadow-xl z-50 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2"
+                  >
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+                      <span>透明度</span>
+                      <span>{Math.round(bgOpacity * 100)}%</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0.1" 
+                      max="0.9" 
+                      step="0.05" 
+                      value={bgOpacity}
+                      onChange={(e) => setBgOpacity(parseFloat(e.target.value))}
+                      className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-emerald-400" 
+                    />
+                  </div>
+                )}
+             </div>
+
              <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400 hover:text-white'}`} title={isLocked ? "解锁窗口" : "锁定位置"}>
                {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
              </button>
              <button onClick={() => setIsCollapsed(!isCollapsed)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isCollapsed ? 'text-emerald-400' : 'text-slate-400 hover:text-white'}`} title={isCollapsed ? "展开" : "卷起"}>
-               {/* 卷起时显示 Square (表示还原)，展开时显示 Minus (表示卷起) */}
                {isCollapsed ? <Square size={14} /> : <Minus size={14} />}
              </button>
           </div>
 
-          {/* --- [新增] 下拉菜单 --- */}
+          {/* --- 下拉菜单 --- */}
           {isToolsMenuOpen && (
             <div className="absolute top-full left-2 mt-1 z-50 bg-[#25262b] border border-white/10 rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[130px] animate-in fade-in slide-in-from-top-2 no-drag">
                <button onClick={() => { setIsSearchOpen(true); setIsToolsMenuOpen(false); }} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded text-left transition-colors">
@@ -660,7 +756,6 @@ export default function App() {
         </div>
 
         {/* --- 主体内容 --- */}
-        {/* 根据 isEffectivelyOpen 控制显隐 */}
         <div className={`flex-1 flex flex-col min-h-0 relative transition-opacity duration-200 ${isEffectivelyOpen ? 'opacity-100' : 'opacity-0 pointer-events-none h-0'}`}>
           <div className="flex items-center justify-between px-2 py-0.1 bg-white/5 flex-shrink-0">
              <h2 className="text-lg font-light text-white flex items-end gap-1">
@@ -697,7 +792,7 @@ export default function App() {
           )}
         </div>
 
-        {/* --- 双击详情弹窗 (保持不变) --- */}
+        {/* --- 双击详情弹窗 --- */}
         {selectedDateKey && !isCollapsed && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
              <div className="w-full max-w-[320px] bg-[#25262b]/90 backdrop-blur border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
