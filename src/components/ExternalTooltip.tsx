@@ -6,47 +6,58 @@ import { getDateInfo } from '../utils';
 export const ExternalTooltip = () => {
   const [data, setData] = useState<{ dateKey: string; tasks: Todo[] } | null>(null);
   const [localInput, setLocalInput] = useState('');
-  
   const [isInputFocused, setIsInputFocused] = useState(false);
+  
   const containerRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // --- [新增] 2秒无操作自动关闭逻辑 ---
+  // --- [修改] 鼠标移出 2秒后自动关闭逻辑 ---
+  const hide = () => {
+    if (isInputFocused) return;
+    // [关键修复] 发送 CX 指令，告知主窗口“弹窗已关闭”，从而清除 isAnyPopupOpen 状态，允许主窗口收起
+    sendAction('CX', null);
+  };
+
+  const handleMouseEnter = () => {
+    // 鼠标移入，清除倒计时，保持显示
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handleMouseLeave = () => {
+    // 鼠标移出，开始2秒倒计时关闭
+    if (!isInputFocused) {
+      timerRef.current = setTimeout(hide, 2000);
+    }
+  };
+
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-
-    const hide = () => {
-      if (isInputFocused) return;
-      window.desktopCalendar?.hideTooltip?.();
-    };
-
-    const resetActivity = () => {
-      clearTimeout(timer);
-      if (!isInputFocused) {
-        timer = setTimeout(hide, 2000); // 2秒无操作则隐藏
-      }
-    };
-
-    // 初始启动计时
-    resetActivity();
-
-    // 监听各种用户操作，有操作就重置计时
-    window.addEventListener('mousemove', resetActivity);
-    window.addEventListener('mousedown', resetActivity);
-    window.addEventListener('keydown', resetActivity);
-    window.addEventListener('wheel', resetActivity);
-
+    // 组件卸载时清理定时器
     return () => {
-      clearTimeout(timer);
-      window.removeEventListener('mousemove', resetActivity);
-      window.removeEventListener('mousedown', resetActivity);
-      window.removeEventListener('keydown', resetActivity);
-      window.removeEventListener('wheel', resetActivity);
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [data, isInputFocused]); // 依赖 data，确保每次切换日期时也重置计时
+  }, []);
+
+  // 监听输入框焦点，防止输入时意外关闭
+  useEffect(() => {
+    if (isInputFocused && timerRef.current) {
+      clearTimeout(timerRef.current);
+    } else if (!isInputFocused && !timerRef.current && data) {
+       // 如果失去焦点且鼠标不在窗口内（这里简单处理，依靠 onMouseLeave 触发即可，
+       // 但为了保险，如果失去焦点时鼠标其实已经不在窗口里了，应该补一个计时？
+       // 实际上 onBlur 不代表鼠标移出，这里保持简单，完全依赖 handleMouseLeave 即可）
+    }
+  }, [isInputFocused]);
+
 
   useEffect(() => {
     const removeListener = window.desktopCalendar?.onUpdateTooltip((payload) => {
       setData(payload);
+      // 数据更新时，如果在倒计时中，重置它？或者保持？
+      // 通常数据更新意味着用户在操作，保持显示比较好
+      if (timerRef.current) clearTimeout(timerRef.current);
     });
     return () => removeListener?.();
   }, []);
@@ -71,7 +82,7 @@ export const ExternalTooltip = () => {
 
   if (!data) {
     return (
-      <div ref={containerRef} className="w-[300px] h-40 p-5 box-border select-none">
+      <div className="w-[300px] h-40 p-5 box-border select-none">
         <div className="w-full h-full bg-[#1a1b1e] border border-white/20 rounded-xl flex flex-col items-center justify-center text-slate-400 gap-2 shadow-2xl">
           <Loader2 className="animate-spin text-emerald-500" size={24} />
           <div className="text-xs font-bold">窗口已加载</div>
@@ -89,7 +100,13 @@ export const ExternalTooltip = () => {
   const uncompleted = tasks.filter(t => !t.completed).length;
 
   return (
-    <div ref={containerRef} className="w-[300px] h-fit p-5 box-border select-none">
+    <div 
+      ref={containerRef} 
+      className="w-[300px] h-fit p-5 box-border select-none"
+      // [修改] 绑定移入移出事件到最外层容器
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       <div className="bg-[#25262b]/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* 标题栏 */}
         <div className="px-3 py-2 bg-white/5 border-b border-white/5 flex items-center justify-between flex-shrink-0 drag-region">
@@ -97,15 +114,12 @@ export const ExternalTooltip = () => {
             <span className="text-sm font-bold text-white whitespace-nowrap">{dateKey}</span>
             {specialDayText && <span className="text-[10px] text-emerald-400 truncate">{specialDayText}</span>}
             <span className="text-[10px] text-slate-500 truncate">{dateInfo.fullLunar}</span>
-
-            {/* [新增] 修复点2：统计 Badge UI */}
             {total > 0 && (
                <div className="text-[10px] font-mono flex items-center gap-[1px] bg-black/20 px-1.5 py-0.5 rounded ml-2 flex-shrink-0">
                  <span className="text-slate-300 font-bold">{total}</span>
                  <span className={uncompleted > 0 ? "text-yellow-400 font-bold" : "text-slate-600"}>/{uncompleted}</span>
                </div>
              )}
-
           </div>
           <button onClick={() => sendAction('CX', null)} className="text-slate-500 hover:text-white transition-colors cursor-pointer no-drag">
              <X size={14}/>
@@ -120,7 +134,6 @@ export const ExternalTooltip = () => {
             tasks.map(task => (
               <div key={task.id} className="group flex items-center gap-2 p-1.5 hover:bg-white/5 rounded transition-colors">
                 <button 
-                  // [修改] Payload 改为对象，包含 id 和 dateKey
                   onClick={() => sendAction('TOGGLE', { id: task.id, dateKey: data.dateKey })} 
                   className={`flex-shrink-0 ${task.completed ? 'text-emerald-500' : 'text-slate-500 hover:text-emerald-400'}`}
                 >
@@ -130,7 +143,6 @@ export const ExternalTooltip = () => {
                   {task.text}
                 </span>
                 <button 
-                  // [修改] Payload 改为对象，包含 id 和 dateKey
                   onClick={() => sendAction('DELETE', { id: task.id, dateKey: data.dateKey })} 
                   className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-opacity"
                 >

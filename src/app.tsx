@@ -661,10 +661,13 @@ export default function App() {
       >
         {/* --- 标题栏 --- */}
         <div 
-          // 确保鼠标移入标题栏也能触发展开
           onMouseEnter={() => { if (isCollapsed) setIsHoverExpanded(true); }}
-          className={`h-8 flex items-center justify-between px-3 border-b bg-white/5 flex-shrink-0 relative 
-            ${isLocked ? 'border-transparent' : 'border-white/10 drag-region'}`}
+          
+          className={`h-8 flex items-center justify-between px-3 bg-white/5 flex-shrink-0 relative 
+            ${isEffectivelyOpen ? 'border-b' : ''} 
+            ${isLocked ? 'border-transparent' : 'border-white/10'}
+            ${(!isLocked || isCollapsed) ? 'drag-region' : ''}
+          `}
         >
           
           {/* 左侧：图标 + 下拉菜单触发器 */}
