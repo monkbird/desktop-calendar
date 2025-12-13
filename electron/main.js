@@ -143,10 +143,18 @@ const createTray = () => {
 }
 
 ipcMain.on('resize-window', (event, { width, height }) => {
-  if (!mainWindow) return;
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (win) win.setSize(Math.round(width), Math.round(height))
-})
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    // [核心修复] Windows下如果 resizable: false，setSize 往往无法缩小窗口
+    // 解决方案：先临时允许调整大小，设置完后再恢复原状
+    const wasResizable = win.isResizable();
+    if (!wasResizable) win.setResizable(true);
+    
+    win.setSize(parseInt(width), parseInt(height));
+    
+    if (!wasResizable) win.setResizable(false);
+  }
+});
 
 ipcMain.on('set-resizable', (event, resizable) => {
   if (!mainWindow) return;
