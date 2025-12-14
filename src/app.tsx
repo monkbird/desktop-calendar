@@ -25,6 +25,10 @@ export default function App() {
   const [isHoverExpanded, setIsHoverExpanded] = useState(false); 
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false); 
 
+  // 年份和月份选择器的显示状态
+  const [showYearPicker, setShowYearPicker] = useState(false);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+
   // 透明度调节状态
   const [isOpacityMenuOpen, setIsOpacityMenuOpen] = useState(false);
   const [bgOpacity, setBgOpacity] = useState(() => {
@@ -63,7 +67,9 @@ export default function App() {
     ];
   });
   
-  const [currentDate, setCurrentDate] = useState(new Date());
+  // 默认日期初始化为 2025年 12月
+  const [currentDate, setCurrentDate] = useState(new Date(2025, 11, 1));
+
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   
@@ -79,7 +85,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // [新增] 汇总所有弹窗/交互状态。只要这里有一个为 true，就不允许自动收起
+  // 汇总所有弹窗/交互状态。只要这里有一个为 true，就不允许自动收起
   const isAnyPopupOpen = useMemo(() => {
     return isToolsMenuOpen || 
            isOpacityMenuOpen || 
@@ -88,8 +94,10 @@ export default function App() {
            isSearchOpen || 
            isDataToolsOpen || 
            showAuth || 
-           !!activeTooltipDate; // Tooltip 也是窗口，存在时不能收起
-  }, [isToolsMenuOpen, isOpacityMenuOpen, selectedDateKey, isHistoryOpen, isSearchOpen, isDataToolsOpen, showAuth, activeTooltipDate]);
+           !!activeTooltipDate ||
+           showYearPicker || 
+           showMonthPicker;   
+  }, [isToolsMenuOpen, isOpacityMenuOpen, selectedDateKey, isHistoryOpen, isSearchOpen, isDataToolsOpen, showAuth, activeTooltipDate, showYearPicker, showMonthPicker]);
 
   useEffect(() => {
     localStorage.setItem('desktop-sync-queue', JSON.stringify(syncQueue));
@@ -257,6 +265,8 @@ export default function App() {
       // 同时关闭可能还开着的非模态菜单（双重保险）
       setIsToolsMenuOpen(false);
       setIsOpacityMenuOpen(false);
+      setShowYearPicker(false);
+      setShowMonthPicker(false);
     }, 2000);
   };
 
@@ -357,6 +367,17 @@ export default function App() {
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
       return 0;
     });
+  };
+
+  // --- 统计辅助函数 ---
+  const getYearlyCompleted = (y: number) => {
+    const prefix = `${y}-`;
+    return todos.filter(t => t.completed && t.targetDate.startsWith(prefix)).length;
+  };
+
+  const getMonthlyCompleted = (y: number, m: number) => {
+    const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
+    return todos.filter(t => t.completed && t.targetDate.startsWith(prefix)).length;
   };
 
   // --- CRUD 操作 ---
@@ -523,6 +544,9 @@ export default function App() {
     setActiveTooltipDate(null);
     setIsToolsMenuOpen(false); 
     setIsOpacityMenuOpen(false); 
+    // [新增] 关闭日期选择器
+    setShowYearPicker(false);
+    setShowMonthPicker(false);
   };
 
   // --- 日历生成 ---
@@ -638,6 +662,11 @@ export default function App() {
        }
     }
   }, [rowCount, currentDate, isCollapsed, isHoverExpanded, isAnyPopupOpen]); 
+  
+  // 辅助数据：年份列表和月份列表
+  const startYear = 2020;
+  const yearsList = Array.from({ length: 20 }, (_, i) => startYear + i); // 2020-2039
+  const monthsList = Array.from({ length: 12 }, (_, i) => i);
 
   return (
     <div 
@@ -669,12 +698,11 @@ export default function App() {
             ${(!isLocked || isCollapsed) ? 'drag-region' : ''}
           `}
         >
-          
           {/* 左侧：图标 + 下拉菜单触发器 */}
           <div className="flex items-center gap-1 min-w-0">
             <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
             <button 
-               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); setIsOpacityMenuOpen(false); }}
+               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); setIsOpacityMenuOpen(false); setShowYearPicker(false); setShowMonthPicker(false); }}
                className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors no-drag group"
             >
                <span className="text-sm font-medium text-slate-200">桌面日历</span>
@@ -761,9 +789,86 @@ export default function App() {
         {/* --- 主体内容 --- */}
         <div className={`flex-1 flex flex-col min-h-0 relative transition-opacity duration-200 ${isEffectivelyOpen ? 'opacity-100' : 'opacity-0 pointer-events-none h-0'}`}>
           <div className="flex items-center justify-between px-2 py-0.1 bg-white/5 flex-shrink-0">
-             <h2 className="text-lg font-light text-white flex items-end gap-1">
-               <span>{year}</span><span className="text-emerald-500">.</span><span>{String(month + 1).padStart(2, '0')}</span>
-             </h2>
+             {/* [修改] 网格选择器布局 */}
+             <div className="flex items-center gap-0.5 text-lg font-light text-white relative">
+               
+               {/* 年份触发器 */}
+               <button 
+                 onClick={(e) => { e.stopPropagation(); setShowYearPicker(!showYearPicker); setShowMonthPicker(false); }}
+                 className="hover:text-emerald-400 hover:bg-white/10 px-0.6 rounded transition-colors no-drag"
+               >
+                 {year}
+               </button>
+               <span className="px-0.3 text-white font-light">年</span>
+               
+               {/* 年份网格弹窗 (修改：去除间距 gap-0，最大化字体) */}
+               {showYearPicker && (
+                 <div 
+                   onClick={(e) => e.stopPropagation()}
+                   className="absolute top-full left-0 mt-2 p-2 bg-[#25262b] border border-white/10 rounded-lg shadow-xl z-50 w-72 animate-in fade-in slide-in-from-top-2 no-drag"
+                 >
+                   {/* 修改：gap-0 */}
+                   <div className="grid grid-cols-4 gap-0">
+                     {yearsList.map(y => {
+                       const count = getYearlyCompleted(y);
+                       return (
+                         <button
+                           key={y}
+                           onClick={() => {
+                             setCurrentDate(new Date(y, month, 1));
+                             setShowYearPicker(false);
+                           }}
+                           // 修改：w-full, h-full, py-3, text-1xl
+                           className={`w-full flex flex-col items-center justify-center py-2 rounded hover:bg-white/10 transition-colors ${y === year ? 'bg-emerald-600/20 text-emerald-400 font-bold' : 'text-slate-300'}`}
+                         >
+                           <span className="text-1xl leading-none">{y}</span>
+                           <span className="text-[12px] text-slate-500 scale-90 mt-0.5">完成: {count}</span>
+                         </button>
+                       );
+                     })}
+                   </div>
+                 </div>
+               )}
+               
+               {/* 月份触发器 */}
+               <button 
+                 onClick={(e) => { e.stopPropagation(); setShowMonthPicker(!showMonthPicker); setShowYearPicker(false); }}
+                 className="hover:text-emerald-400 hover:bg-white/10 px-0.6 rounded transition-colors no-drag ml-1"
+               >
+                 {String(month + 1).padStart(2, '0')}
+               </button>
+               <span className="px-0.3 text-white font-light">月</span>
+
+               {/* 月份网格弹窗 (修改：去除间距 gap-0，最大化字体) */}
+               {showMonthPicker && (
+                 <div 
+                   onClick={(e) => e.stopPropagation()}
+                   className="absolute top-full left-10 mt-2 p-2 bg-[#25262b] border border-white/10 rounded-lg shadow-xl z-50 w-64 animate-in fade-in slide-in-from-top-2 no-drag"
+                 >
+                   {/* 修改：gap-0 */}
+                   <div className="grid grid-cols-3 gap-0">
+                     {monthsList.map(m => {
+                        const count = getMonthlyCompleted(year, m);
+                        return (
+                         <button
+                           key={m}
+                           onClick={() => {
+                             setCurrentDate(new Date(year, m, 1));
+                             setShowMonthPicker(false);
+                           }}
+                           // 修改：w-full, h-full, py-2, text-1xl
+                           className={`w-full flex flex-col items-center justify-center py-1 rounded hover:bg-white/10 transition-colors ${m === month ? 'bg-emerald-600/20 text-emerald-400 font-bold' : 'text-slate-300'}`}
+                         >
+                           <span className="text-1xl leading-none">{m + 1}月</span>
+                           <span className="text-[12px] text-slate-500 scale-90 mt-0.5">完成: {count}</span>
+                         </button>
+                       );
+                     })}
+                   </div>
+                 </div>
+               )}
+             </div>
+
              <div className="flex gap-1 no-drag">
                <button onClick={() => setCurrentDate(new Date())} className="p-1 hover:bg-white/10 rounded text-emerald-400" title="回到今天"><RotateCcw size={14} /></button>
                <div className="flex bg-white/5 rounded">

@@ -8,20 +8,27 @@
     "dev": "vite --port 30122",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "electron:start": "electron .",
     "electron:dev": "set ELECTRON_START_URL=http://localhost:30122&& start npm run dev && electron .",
+    "electron:dev:mac": "ELECTRON_START_URL=http://localhost:30122 electron .",
+    "dev:desktop": "concurrently -n web,electron -c green,blue \"npm:dev\" \"wait-on http://localhost:30122 && cross-env ELECTRON_START_URL=http://localhost:30122 electron .\"",
     "electron:build": "npm run build && electron-builder --win nsis"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.17",
     "typescript": "~5.9.3",
-    "vite": "npm:rolldown-vite@7.2.5"
+    "vite": "npm:rolldown-vite@7.2.5",
+    "wait-on": "^7.2.0"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.2.5"
