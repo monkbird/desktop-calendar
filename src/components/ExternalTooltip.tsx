@@ -8,6 +8,10 @@ export const ExternalTooltip = () => {
   const [localInput, setLocalInput] = useState('');
   const [isInputFocused, setIsInputFocused] = useState(false);
   
+  // [新增] 编辑状态
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+
   const containerRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -113,6 +117,25 @@ export const ExternalTooltip = () => {
     setLocalInput('');
   };
 
+  const handleStartEdit = (task: Todo) => {
+    setEditingId(task.id);
+    setEditText(task.text);
+    setIsInputFocused(true); // 防止自动关闭
+  };
+
+  const handleFinishEdit = () => {
+    if (editingId && editText.trim()) {
+      // 只有内容变了才发送
+      const originalTask = data?.tasks.find(t => t.id === editingId);
+      if (originalTask && originalTask.text !== editText) {
+         sendAction('UPDATE', { id: editingId, text: editText, dateKey: data?.dateKey });
+      }
+    }
+    setEditingId(null);
+    setEditText('');
+    setIsInputFocused(false);
+  };
+
   if (!data) {
     return (
       <div className="w-[300px] h-40 p-5 box-border select-none">
@@ -170,9 +193,26 @@ export const ExternalTooltip = () => {
                 >
                   {task.completed ? <CheckSquare size={14} /> : <Square size={14} />}
                 </button>
-                <span className={`flex-1 text-xs truncate cursor-default ${task.completed ? 'text-slate-600 line-through' : 'text-slate-300'}`} title={task.text}>
-                  {task.text}
-                </span>
+                
+                {editingId === task.id ? (
+                  <input 
+                    autoFocus
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    onBlur={handleFinishEdit}
+                    onKeyDown={(e) => e.key === 'Enter' && handleFinishEdit()}
+                    className="flex-1 min-w-0 bg-black/50 text-xs text-white px-1 py-0.5 rounded outline-none border border-emerald-500/50"
+                  />
+                ) : (
+                  <span 
+                    onDoubleClick={() => handleStartEdit(task)}
+                    className={`flex-1 text-xs truncate cursor-text select-text ${task.completed ? 'text-slate-600 line-through' : 'text-slate-300'}`} 
+                    title="双击编辑"
+                  >
+                    {task.text}
+                  </span>
+                )}
+
                 <button 
                   onClick={() => sendAction('DELETE', { id: task.id, dateKey: data.dateKey })} 
                   className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-opacity"

@@ -546,6 +546,9 @@ export default function App() {
       else if (type === 'DELETE') {
         handleDeleteTodo(payload.id); 
       } 
+      else if (type === 'UPDATE') {
+        handleUpdateTodoText(payload.id, payload.text);
+      }
       else if (type === 'CX') {
          window.desktopCalendar?.hideTooltip?.();
          setActiveTooltipDate(null);
@@ -980,7 +983,7 @@ export default function App() {
         </div>
 
         {/* --- 双击详情弹窗 --- */}
-        {selectedDateKey && !isCollapsed && (
+        {selectedDateKey && (!isCollapsed || isHoverExpanded) && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
              <div className="w-full max-w-[320px] bg-[#25262b]/90 backdrop-blur border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
                <div className="p-3 border-b border-white/10 bg-white/5 flex justify-between items-center">
