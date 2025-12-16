@@ -46,6 +46,8 @@ export default function App() {
   // 鼠标追踪与延时收起 Ref
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMouseInsideRef = useRef(false);
+  // [新增] Tooltip 防抖定时器，减少 IPC 通信频率，优化内存和 CPU
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auth 状态
   const [session, setSession] = useState<Session | null>(null);
@@ -549,27 +551,45 @@ export default function App() {
   const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
     if (isResizing) return;
 
+    // [优化] 清除之前的防抖定时器
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const tasks = getTasksForDate(dateKey);
 
     if (tasks.length === 0) {
-      window.desktopCalendar?.hideTooltip?.();
-      setActiveTooltipDate(null);
+      // 即使是隐藏，也稍微防抖一下，避免快速划过时频繁触发 IPC
+      tooltipTimerRef.current = setTimeout(() => {
+        window.desktopCalendar?.hideTooltip?.();
+        setActiveTooltipDate(null);
+      }, 100);
       return;
     }
 
-    setActiveTooltipDate(dateKey);
+    // [优化] 延迟 150ms 显示，避免鼠标快速划过时触发大量计算和通信
+    tooltipTimerRef.current = setTimeout(() => {
+      setActiveTooltipDate(dateKey);
 
-    window.desktopCalendar?.showTooltip?.({
-      x: rect.right,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
-      data: { dateKey, tasks }
-    });
+      window.desktopCalendar?.showTooltip?.({
+        x: rect.right,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+        data: { dateKey, tasks }
+      });
+    }, 150);
   };
 
-  const handleMouseLeaveAnywhere = () => {};
+  const handleMouseLeaveAnywhere = () => {
+    // [优化] 鼠标移出格子时，清除待执行的显示/隐藏任务
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+  };
 
   const handleAppClick = () => {
     // 点击空白处，关闭一些轻量级菜单
