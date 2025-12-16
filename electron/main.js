@@ -221,7 +221,15 @@ ipcMain.on('resize-tooltip-window', (event, { width, height }) => {
     const bounds = tooltipWindow.getBounds();
     // 只有当尺寸真的变化较大时才调整
     if (Math.abs(bounds.height - height) > 2 || Math.abs(bounds.width - width) > 2) {
+      // [修复] Windows下如果 resizable: false，setSize 往往无法缩小窗口
+      // 必须先临时开启 resizable
+      const wasResizable = tooltipWindow.isResizable();
+      if (!wasResizable) tooltipWindow.setResizable(true);
+
       tooltipWindow.setSize(Math.round(width), Math.round(height));
+
+      if (!wasResizable) tooltipWindow.setResizable(false);
+
       // [核心修复] 将最新的 height 传给定位函数，防止 getBounds() 返回旧值导致定位计算错误
       updateTooltipPosition(width, height);
     }
