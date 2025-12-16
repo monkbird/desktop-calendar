@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import { X, Trash2, RotateCcw, Calendar, CheckCircle2 } from 'lucide-react';
 import type { Todo } from '../types';
 
@@ -45,6 +45,40 @@ export const HistoryModal = ({ isOpen, onClose, todos, onToggleTodo, onDeleteTod
       }));
   }, [todos]);
 
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    let timeoutId: number | null = null;
+
+    const show = () => {
+      el.classList.add('scrollbar-visible');
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        el.classList.remove('scrollbar-visible');
+      }, 800);
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0 || event.deltaX !== 0) show();
+    };
+
+    const handleScroll = () => {
+      show();
+    };
+
+    el.addEventListener('wheel', handleWheel);
+    el.addEventListener('scroll', handleScroll);
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('scroll', handleScroll);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [isOpen]);
+
   // 2. 如果不显示，直接返回 null
   if (!isOpen) return null;
 
@@ -67,7 +101,7 @@ export const HistoryModal = ({ isOpen, onClose, todos, onToggleTodo, onDeleteTod
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar">
           {historyGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-slate-600 gap-3">
               <Calendar size={40} className="opacity-20" />

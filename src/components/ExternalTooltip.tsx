@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { CheckSquare, Square, Plus, Trash2, X, Loader2 } from 'lucide-react';
+import { CheckSquare, Square, Plus, Trash2, Loader2 } from 'lucide-react';
 import type { Todo } from '../types';
 import { getDateInfo } from '../utils';
 
@@ -10,6 +10,7 @@ export const ExternalTooltip = () => {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // --- [修改] 鼠标移出 2秒后自动关闭逻辑 ---
   const hide = () => {
@@ -62,6 +63,38 @@ export const ExternalTooltip = () => {
     return () => removeListener?.();
   }, []);
 
+  useEffect(() => {
+    if (!data) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    let timeoutId: number | null = null;
+
+    const show = () => {
+      el.classList.add('scrollbar-visible');
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        el.classList.remove('scrollbar-visible');
+      }, 800);
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0 || event.deltaX !== 0) show();
+    };
+
+    const handleScroll = () => {
+      show();
+    };
+
+    el.addEventListener('wheel', handleWheel);
+    el.addEventListener('scroll', handleScroll);
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('scroll', handleScroll);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [data]);
+
   useLayoutEffect(() => {
     if (containerRef.current) {
       const height = containerRef.current.offsetHeight;
@@ -107,7 +140,7 @@ export const ExternalTooltip = () => {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <div className="bg-[#25262b]/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-[#25262b]/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg flex flex-col overflow-hidden">
         {/* 标题栏 */}
         <div className="px-3 py-2 bg-white/5 border-b border-white/5 flex items-center justify-between flex-shrink-0 drag-region">
           <div className="flex items-center gap-2 overflow-hidden">
@@ -121,13 +154,11 @@ export const ExternalTooltip = () => {
                </div>
              )}
           </div>
-          <button onClick={() => sendAction('CX', null)} className="text-slate-500 hover:text-white transition-colors cursor-pointer no-drag">
-             <X size={14}/>
-          </button>
+          {/* [已删除] 关闭按钮 X */}
         </div>
 
         {/* 列表 */}
-        <div className="flex-1 overflow-y-auto px-2 py-2 custom-scrollbar min-h-0 max-h-64 no-drag">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-2 py-2 custom-scrollbar min-h-0 max-h-64 no-drag">
           {tasks.length === 0 ? (
             <div className="flex items-center justify-center text-slate-600 text-xs py-4">暂无事项</div>
           ) : (

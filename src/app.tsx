@@ -41,6 +41,7 @@ export default function App() {
   const [isDataToolsOpen, setIsDataToolsOpen] = useState(false);
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const detailScrollRef = useRef<HTMLDivElement | null>(null);
 
   // 鼠标追踪与延时收起 Ref
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,7 +257,7 @@ export default function App() {
   const scheduleCollapse = () => {
     if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
     
-    // 2秒后尝试收起
+    // 0.2秒后尝试收起
     collapseTimerRef.current = setTimeout(() => {
       // 再次检查：如果有弹窗，或者鼠标又回来了，就不收起
       if (isAnyPopupOpen || isMouseInsideRef.current) return;
@@ -267,7 +268,7 @@ export default function App() {
       setIsOpacityMenuOpen(false);
       setShowYearPicker(false);
       setShowMonthPicker(false);
-    }, 2000);
+    }, 200);
   };
 
   // 取消收起
@@ -314,6 +315,38 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('desktop-todos-v8', JSON.stringify(todos));
   }, [todos]);
+
+  useEffect(() => {
+    if (!selectedDateKey || isCollapsed) return;
+    const el = detailScrollRef.current;
+    if (!el) return;
+    let timeoutId: number | null = null;
+
+    const show = () => {
+      el.classList.add('scrollbar-visible');
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        el.classList.remove('scrollbar-visible');
+      }, 800);
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0 || event.deltaX !== 0) show();
+    };
+
+    const handleScroll = () => {
+      show();
+    };
+
+    el.addEventListener('wheel', handleWheel);
+    el.addEventListener('scroll', handleScroll);
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('scroll', handleScroll);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [selectedDateKey, isCollapsed]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -691,13 +724,12 @@ export default function App() {
         {/* --- 标题栏 --- */}
         <div 
           onMouseEnter={() => { if (isCollapsed) setIsHoverExpanded(true); }}
-          
           className={`h-8 flex items-center justify-between px-3 bg-white/5 flex-shrink-0 relative 
             ${isEffectivelyOpen ? 'border-b' : ''} 
             ${isLocked ? 'border-transparent' : 'border-white/10'}
-            ${(!isLocked || isCollapsed) ? 'drag-region' : ''}
           `}
         >
+          {!isLocked && <div className="absolute inset-0 drag-region pointer-events-none" />}
           {/* 左侧：图标 + 下拉菜单触发器 */}
           <div className="flex items-center gap-1 min-w-0">
             <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
@@ -911,7 +943,7 @@ export default function App() {
                  </div>
                  <button onClick={() => setSelectedDateKey(null)} className="p-1 hover:bg-white/10 rounded-full text-slate-200"><X size={16} /></button>
                </div>
-               <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+               <div ref={detailScrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
                  {getTasksForDate(selectedDateKey).map(t => (
                    <div key={t.id} className="flex gap-2 items-center p-2 rounded hover:bg-white/5 group bg-black/20">
                      <button onClick={() => handleToggleTodo(t.id)} className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${t.completed ? 'bg-emerald-600 border-transparent' : 'border-slate-200'}`}>

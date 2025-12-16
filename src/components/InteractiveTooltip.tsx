@@ -33,6 +33,7 @@ export const InteractiveTooltip: FC<InteractiveTooltipProps> = ({
   if (!targetRect) return null;
 
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState({ x: -9999, y: -9999 }); // 初始隐藏
   const [localInput, setLocalInput] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -75,6 +76,37 @@ export const InteractiveTooltip: FC<InteractiveTooltipProps> = ({
 
     setPosition({ x: left, y: top });
   }, [targetRect, containerSize.width, containerSize.height]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let timeoutId: number | null = null;
+
+    const show = () => {
+      el.classList.add('scrollbar-visible');
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        el.classList.remove('scrollbar-visible');
+      }, 800);
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0 || event.deltaX !== 0) show();
+    };
+
+    const handleScroll = () => {
+      show();
+    };
+
+    el.addEventListener('wheel', handleWheel);
+    el.addEventListener('scroll', handleScroll);
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('scroll', handleScroll);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   const { total, uncompleted, dateInfo } = useMemo(() => {
     const total = tasks.length;
@@ -140,7 +172,7 @@ export const InteractiveTooltip: FC<InteractiveTooltipProps> = ({
       </div>
 
       {/* 列表区 */}
-      <div className="flex-1 overflow-y-auto px-1 py-1 custom-scrollbar min-h-[60px] max-h-[180px]">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-1 py-1 custom-scrollbar min-h-[60px] max-h-[180px]">
           {tasks.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-600 py-4">
                   <p className="text-[10px]">暂无事项</p>

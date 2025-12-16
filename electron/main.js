@@ -162,18 +162,67 @@ ipcMain.on('set-resizable', (event, resizable) => {
   if (win) win.setResizable(resizable)
 })
 
-// [新增] 监听子窗口的高度调整请求
+let currentTargetRect = null;
+
+// 抽离定位逻辑，方便在 show 和 resize 时复用
+const updateTooltipPosition = () => {
+  if (!tooltipWindow || !mainWindow || !currentTargetRect) return;
+
+  const { x, y, width, height } = currentTargetRect;
+  const winBounds = mainWindow.getBounds();
+  const display = screen.getDisplayMatching(winBounds);
+  const workArea = display.workArea;
+
+  const PADDING = 20;
+  const GAP_X = 6;
+  
+  const cellRight = winBounds.x + x;
+  const cellTop = winBounds.y + y;
+  const cellLeft = cellRight - width;
+  const cellBottom = cellTop + height;
+
+  const tooltipBounds = tooltipWindow.getBounds();
+  const tooltipW = tooltipBounds.width || 300;
+  const tooltipH = tooltipBounds.height || 200;
+
+  // --- 横向定位 ---
+  let winX = cellRight + GAP_X - PADDING;
+  const visualRight = winX + tooltipW - PADDING;
+  if (visualRight > workArea.x + workArea.width) {
+    winX = cellLeft - GAP_X - tooltipW + PADDING;
+  }
+  if (winX + PADDING < workArea.x) {
+    winX = workArea.x - PADDING;
+  }
+
+  // --- 纵向定位 ---
+  let winY = cellTop - PADDING;
+  const visualBottom = winY + tooltipH - PADDING;
+  if (visualBottom > workArea.y + workArea.height) {
+    // 底部溢出，改为底对底
+    winY = cellBottom - tooltipH + PADDING;
+  }
+  // 顶部溢出兜底
+  if (winY + PADDING < workArea.y) {
+    winY = workArea.y - PADDING;
+  }
+
+  tooltipWindow.setPosition(Math.round(winX), Math.round(winY));
+};
+
 ipcMain.on('resize-tooltip-window', (event, { width, height }) => {
   if (tooltipWindow) {
-    // 只有当尺寸真的变化较大时才调整，防止抖动（可选）
     const bounds = tooltipWindow.getBounds();
+    // 只有当尺寸真的变化较大时才调整
     if (Math.abs(bounds.height - height) > 2 || Math.abs(bounds.width - width) > 2) {
       tooltipWindow.setSize(Math.round(width), Math.round(height));
+      // [核心修复] 高度变化后，立即基于最新的高度重新计算位置
+      // 这样能确保“底对底”模式下，高度变小后，底边依然贴合
+      updateTooltipPosition();
     }
   }
 });
 
-// [新增] 监听仅更新数据的请求，不执行 setPosition
 ipcMain.on('update-tooltip-data-only', (event, data) => {
   if (tooltipWindow && !tooltipWindow.isDestroyed()) {
     tooltipWindow.webContents.send('update-tooltip-data', data);
@@ -182,26 +231,18 @@ ipcMain.on('update-tooltip-data-only', (event, data) => {
 
 ipcMain.on('show-tooltip-window', (event, { x, y, width, height, data }) => {
   if (!tooltipWindow || !mainWindow) return;
-  const winBounds = mainWindow.getBounds();
-  
-  const PADDING = 20; 
-  const WINDOW_WIDTH = 300; 
 
-  let contentX = winBounds.x + x; 
-  let contentY = winBounds.y + y; 
+  // 保存当前的格子目标，供 resize 时复用
+  currentTargetRect = { x, y, width, height };
 
-  const display = screen.getDisplayMatching(winBounds);
-  
-  if (contentX + WINDOW_WIDTH > display.workArea.x + display.workArea.width) {
-    contentX = winBounds.x + (x - width - (WINDOW_WIDTH - PADDING * 2)); 
-    if (contentX < display.workArea.x) contentX = display.workArea.x;
-  }
-
-  // 重置一下位置
-  tooltipWindow.setPosition(Math.round(contentX - PADDING), Math.round(contentY - PADDING));
-  
+  // 1. 先发数据，让渲染进程开始计算高度
   tooltipWindow.webContents.send('update-tooltip-data', data);
-  tooltipWindow.showInactive(); 
+  
+  // 2. 先执行一次定位（基于当前/旧的高度），确保窗口大概在正确位置出现
+  // 即使高度不对，也不会跳太远。等 resize 回调回来后会修正。
+  updateTooltipPosition();
+  
+  tooltipWindow.showInactive();
 });
 
 ipcMain.on('hide-tooltip-window', () => {

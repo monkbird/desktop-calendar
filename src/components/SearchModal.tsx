@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { X, Search, Calendar, ArrowRight } from 'lucide-react';
 import type { Todo } from '../types';
 
@@ -11,6 +11,7 @@ interface SearchModalProps {
 
 export const SearchModal = ({ isOpen, onClose, todos, onNavigate }: SearchModalProps) => {
   const [query, setQuery] = useState('');
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const filteredTodos = useMemo(() => {
     if (!query.trim()) return [];
@@ -37,6 +38,38 @@ export const SearchModal = ({ isOpen, onClose, todos, onNavigate }: SearchModalP
     }
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    let timeoutId: number | null = null;
+
+    const show = () => {
+      el.classList.add('scrollbar-visible');
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        el.classList.remove('scrollbar-visible');
+      }, 800);
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0 || event.deltaX !== 0) show();
+    };
+
+    const handleScroll = () => {
+      show();
+    };
+
+    el.addEventListener('wheel', handleWheel);
+    el.addEventListener('scroll', handleScroll);
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('scroll', handleScroll);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
@@ -59,7 +92,7 @@ export const SearchModal = ({ isOpen, onClose, todos, onNavigate }: SearchModalP
         </div>
 
         {/* Results */}
-        <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 custom-scrollbar">
           {filteredTodos.length === 0 ? (
             <div className="text-center py-8 text-slate-500 text-xs">
               {query ? '未找到相关结果' : '输入关键词开始搜索'}
