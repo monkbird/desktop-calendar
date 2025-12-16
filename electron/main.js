@@ -165,7 +165,7 @@ ipcMain.on('set-resizable', (event, resizable) => {
 let currentTargetRect = null;
 
 // 抽离定位逻辑，方便在 show 和 resize 时复用
-const updateTooltipPosition = () => {
+const updateTooltipPosition = (targetW, targetH) => {
   if (!tooltipWindow || !mainWindow || !currentTargetRect) return;
 
   const { x, y, width, height } = currentTargetRect;
@@ -182,8 +182,9 @@ const updateTooltipPosition = () => {
   const cellBottom = cellTop + height;
 
   const tooltipBounds = tooltipWindow.getBounds();
-  const tooltipW = tooltipBounds.width || 300;
-  const tooltipH = tooltipBounds.height || 200;
+  // 优先使用传入的目标尺寸（resize 事件中是最新的），否则回退到当前窗口尺寸
+  const tooltipW = targetW || tooltipBounds.width || 300;
+  const tooltipH = targetH || tooltipBounds.height || 200;
 
   // --- 横向定位 ---
   let winX = cellRight + GAP_X - PADDING;
@@ -198,10 +199,15 @@ const updateTooltipPosition = () => {
   // --- 纵向定位 ---
   let winY = cellTop - PADDING;
   const visualBottom = winY + tooltipH - PADDING;
+  
+  // 检查是否底部溢出
   if (visualBottom > workArea.y + workArea.height) {
     // 底部溢出，改为底对底
+    // 计算公式：窗口Y = 目标底边 - 窗口高度 + PADDING
+    // 这样 视觉底边(窗口Y + 窗口高度 - PADDING) = 目标底边
     winY = cellBottom - tooltipH + PADDING;
   }
+  
   // 顶部溢出兜底
   if (winY + PADDING < workArea.y) {
     winY = workArea.y - PADDING;
@@ -216,9 +222,8 @@ ipcMain.on('resize-tooltip-window', (event, { width, height }) => {
     // 只有当尺寸真的变化较大时才调整
     if (Math.abs(bounds.height - height) > 2 || Math.abs(bounds.width - width) > 2) {
       tooltipWindow.setSize(Math.round(width), Math.round(height));
-      // [核心修复] 高度变化后，立即基于最新的高度重新计算位置
-      // 这样能确保“底对底”模式下，高度变小后，底边依然贴合
-      updateTooltipPosition();
+      // [核心修复] 将最新的 height 传给定位函数，防止 getBounds() 返回旧值导致定位计算错误
+      updateTooltipPosition(width, height);
     }
   }
 });
