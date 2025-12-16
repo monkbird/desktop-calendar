@@ -253,7 +253,7 @@ export const ExternalTooltip = () => {
                   <span 
                     onDoubleClick={() => handleStartEdit(task)}
                     className={`flex-1 text-xs truncate cursor-text select-text ${task.completed ? 'text-slate-600 line-through' : 'text-slate-300'}`} 
-                    title="双击编辑"
+                    title={task.text}
                   >
                     {task.text}
                   </span>
