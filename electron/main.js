@@ -150,7 +150,30 @@ ipcMain.on('resize-window', (event, { width, height }) => {
     const wasResizable = win.isResizable();
     if (!wasResizable) win.setResizable(true);
     
-    win.setSize(parseInt(width), parseInt(height));
+    const bounds = win.getBounds();
+    const display = screen.getDisplayMatching(bounds);
+    const workArea = display.workArea;
+    const workAreaBottom = workArea.y + workArea.height;
+
+    // 检查当前是否吸附在底部 (阈值 20px)
+    const isBottomAligned = Math.abs((bounds.y + bounds.height) - workAreaBottom) < 20;
+    
+    const newWidth = parseInt(width);
+    const newHeight = parseInt(height);
+
+    if (isBottomAligned) {
+      // 如果当前是底部吸附，调整 Y 坐标以保持底部吸附
+      const newY = workAreaBottom - newHeight;
+      win.setBounds({
+        x: bounds.x,
+        y: newY,
+        width: newWidth,
+        height: newHeight
+      });
+    } else {
+      // 否则正常调整大小（默认向下/向右延伸）
+      win.setSize(newWidth, newHeight);
+    }
     
     if (!wasResizable) win.setResizable(false);
   }
