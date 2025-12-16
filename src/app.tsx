@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect, useMemo, lazy, Suspense, useCallback } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { 
   Calendar as CalendarIcon, 
@@ -13,11 +13,13 @@ import {
   CHINESE_NUMS, getDaysInMonth, getFirstDayOfMonth, formatDateKey, getDateInfo 
 } from './utils';
 import { CalendarCell } from './components/CalendarCell';
-import { HistoryModal } from './components/HistoryModal'; 
-import { AuthModal } from './components/AuthModal';
-import { SearchModal } from './components/SearchModal';
-import { DataToolsModal } from './components/DataToolsModal';
 import { supabase } from './supabase';
+
+// [优化] 懒加载非首屏组件，减少初始内存占用
+const HistoryModal = lazy(() => import('./components/HistoryModal').then(module => ({ default: module.HistoryModal })));
+const AuthModal = lazy(() => import('./components/AuthModal').then(module => ({ default: module.AuthModal })));
+const SearchModal = lazy(() => import('./components/SearchModal').then(module => ({ default: module.SearchModal })));
+const DataToolsModal = lazy(() => import('./components/DataToolsModal').then(module => ({ default: module.DataToolsModal })));
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
@@ -390,19 +392,44 @@ export default function App() {
 
   const today = nowDate;
   const todayKey = formatDateKey(today);
+
+  // [优化] 预计算渲染任务映射，确保引用稳定，减少子组件重渲染
+  const EMPTY_TASKS: Todo[] = [];
   
-  const getTasksForDate = (dateKey: string) => {
-    const isToday = dateKey === todayKey;
-    return todos.filter(todo => {
-      if (todo.completed) return todo.targetDate === dateKey;
-      if (isToday) return todo.targetDate <= dateKey;
-      if (dateKey > todayKey) return todo.targetDate === dateKey;
-      return false; 
-    }).sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1;
-      return 0;
+  const tasksForRender = useMemo(() => {
+    const map: Record<string, Todo[]> = {};
+    const sortFn = (a: Todo, b: Todo) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1);
+
+    todos.forEach(t => {
+      // 1. 已完成任务：始终显示在目标日期
+      if (t.completed) {
+        if (!map[t.targetDate]) map[t.targetDate] = [];
+        map[t.targetDate].push(t);
+      } else {
+        // 2. 未完成任务
+        if (t.targetDate < todayKey) {
+          // 过期未完成 -> 归到今天
+          if (!map[todayKey]) map[todayKey] = [];
+          map[todayKey].push(t);
+        } else {
+          // 今天及未来的未完成 -> 显示在目标日期
+          if (!map[t.targetDate]) map[t.targetDate] = [];
+          map[t.targetDate].push(t);
+        }
+      }
     });
-  };
+
+    // 排序
+    Object.keys(map).forEach(k => {
+      map[k].sort(sortFn);
+    });
+
+    return map;
+  }, [todos, todayKey]);
+  
+  const getTasksForDate = useCallback((dateKey: string) => {
+    return tasksForRender[dateKey] || EMPTY_TASKS;
+  }, [tasksForRender]);
 
   // --- 统计辅助函数 ---
   const getYearlyCompleted = (y: number) => {
@@ -548,7 +575,7 @@ export default function App() {
     }
   };
 
-  const handleMouseEnterCell = (dateKey: string, e: ReactMouseEvent) => {
+  const handleMouseEnterCell = useCallback((dateKey: string, e: ReactMouseEvent) => {
     if (isResizing) return;
 
     // [优化] 清除之前的防抖定时器
@@ -581,15 +608,15 @@ export default function App() {
         data: { dateKey, tasks }
       });
     }, 150);
-  };
+  }, [isResizing, getTasksForDate]);
 
-  const handleMouseLeaveAnywhere = () => {
+  const handleMouseLeaveAnywhere = useCallback(() => {
     // [优化] 鼠标移出格子时，清除待执行的显示/隐藏任务
     if (tooltipTimerRef.current) {
       clearTimeout(tooltipTimerRef.current);
       tooltipTimerRef.current = null;
     }
-  };
+  }, []);
 
   const handleAppClick = () => {
     // 点击空白处，关闭一些轻量级菜单
@@ -1006,32 +1033,40 @@ export default function App() {
         )}
       </div>
 
-      <HistoryModal 
-        isOpen={isHistoryOpen} 
-        onClose={() => setIsHistoryOpen(false)}
-        todos={todos}
-        onToggleTodo={handleToggleTodo}
-        onDeleteTodo={handleDeleteTodo}
-      />
+      <Suspense fallback={null}>
+        {isHistoryOpen && (
+          <HistoryModal 
+            isOpen={isHistoryOpen} 
+            onClose={() => setIsHistoryOpen(false)}
+            todos={todos}
+            onToggleTodo={handleToggleTodo}
+            onDeleteTodo={handleDeleteTodo}
+          />
+        )}
 
-      <SearchModal 
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        todos={todos}
-        onNavigate={(date) => {
-          setCurrentDate(date);
-          setIsSearchOpen(false);
-        }}
-      />
+        {isSearchOpen && (
+          <SearchModal 
+            isOpen={isSearchOpen}
+            onClose={() => setIsSearchOpen(false)}
+            todos={todos}
+            onNavigate={(date) => {
+              setCurrentDate(date);
+              setIsSearchOpen(false);
+            }}
+          />
+        )}
 
-      <DataToolsModal 
-        isOpen={isDataToolsOpen}
-        onClose={() => setIsDataToolsOpen(false)}
-        todos={todos}
-        onImport={handleBatchImport}
-      />
+        {isDataToolsOpen && (
+          <DataToolsModal 
+            isOpen={isDataToolsOpen}
+            onClose={() => setIsDataToolsOpen(false)}
+            todos={todos}
+            onImport={handleBatchImport}
+          />
+        )}
 
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+        {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+      </Suspense>
     </div>
   );
 }

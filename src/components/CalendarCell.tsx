@@ -1,4 +1,4 @@
-import type { FC, MouseEvent } from 'react';
+import { type FC, type MouseEvent, memo } from 'react';
 import type { Todo } from '../types';
 
 interface CalendarCellProps {
@@ -16,7 +16,7 @@ interface CalendarCellProps {
   isOtherMonth?: boolean; 
 }
 
-export const CalendarCell: FC<CalendarCellProps> = ({
+export const CalendarCell: FC<CalendarCellProps> = memo(({
   day,
   dateKey,
   isToday,
@@ -97,4 +97,4 @@ export const CalendarCell: FC<CalendarCellProps> = ({
       )}
     </div>
   );
-};
+});
