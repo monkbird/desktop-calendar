@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { CheckSquare, Square, Plus, Trash2, Loader2 } from 'lucide-react';
+import { CheckSquare, Square, Plus, Trash2, Loader2, GripVertical } from 'lucide-react';
 import type { Todo } from '../types';
 import { getDateInfo } from '../utils';
 
@@ -136,6 +136,41 @@ export const ExternalTooltip = () => {
     setIsInputFocused(false);
   };
 
+  const [draggedItem, setDraggedItem] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    if (editingId) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedItem(id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    if (!draggedItem || draggedItem === id || !data) return;
+
+    const newTasks = [...data.tasks];
+    const draggedIndex = newTasks.findIndex(t => t.id === draggedItem);
+    const hoverIndex = newTasks.findIndex(t => t.id === id);
+
+    if (draggedIndex === -1 || hoverIndex === -1) return;
+
+    const [removed] = newTasks.splice(draggedIndex, 1);
+    newTasks.splice(hoverIndex, 0, removed);
+
+    setData({ ...data, tasks: newTasks });
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDraggedItem(null);
+    if (!data) return;
+    const reorderedIds = data.tasks.map(t => t.id);
+    sendAction('REORDER', { dateKey: data.dateKey, reorderedIds });
+  };
+
   if (!data) {
     return (
       <div className="w-[300px] h-40 p-5 box-border select-none">
@@ -186,7 +221,18 @@ export const ExternalTooltip = () => {
             <div className="flex items-center justify-center text-slate-600 text-xs py-4">暂无事项</div>
           ) : (
             tasks.map(task => (
-              <div key={task.id} className="group flex items-center gap-2 p-1.5 hover:bg-white/5 rounded transition-colors">
+              <div 
+                key={task.id} 
+                className={`group flex items-center gap-2 p-1.5 hover:bg-white/5 rounded transition-colors ${draggedItem === task.id ? 'opacity-30' : ''}`}
+                draggable={editingId !== task.id}
+                onDragStart={(e) => handleDragStart(e, task.id)}
+                onDragOver={(e) => handleDragOver(e, task.id)}
+                onDrop={handleDrop}
+              >
+                <div className="cursor-grab active:cursor-grabbing text-slate-600 hover:text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" title="拖拽排序">
+                  <GripVertical size={12} />
+                </div>
+                
                 <button 
                   onClick={() => sendAction('TOGGLE', { id: task.id, dateKey: data.dateKey })} 
                   className={`flex-shrink-0 ${task.completed ? 'text-emerald-500' : 'text-slate-500 hover:text-emerald-400'}`}

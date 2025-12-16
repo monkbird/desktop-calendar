@@ -8,6 +8,7 @@ export interface Todo {
   completedAt?: number;
   createdAt?: number;
   updatedAt?: number;
+  order?: number;
 }
 
 export type SyncActionType = 'INSERT' | 'UPDATE' | 'DELETE';

@@ -398,7 +398,10 @@ export default function App() {
   
   const tasksForRender = useMemo(() => {
     const map: Record<string, Todo[]> = {};
-    const sortFn = (a: Todo, b: Todo) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1);
+    const sortFn = (a: Todo, b: Todo) => {
+      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      return (a.order || 0) - (b.order || 0);
+    };
 
     todos.forEach(t => {
       // 1. 已完成任务：始终显示在目标日期
@@ -449,7 +452,7 @@ export default function App() {
     const id = crypto.randomUUID();
     const nowTs = Date.now();
     const newTodo: Todo = { 
-      id, text, completed: false, targetDate: dateKey, createdAt: nowTs, updatedAt: nowTs 
+      id, text, completed: false, targetDate: dateKey, createdAt: nowTs, updatedAt: nowTs, order: nowTs 
     };
     setTodos(prev => [...prev, newTodo]);
     if (session) {
@@ -497,6 +500,35 @@ export default function App() {
       const action: SyncAction = { id, type: 'UPDATE', payload: { text: newText }, timestamp: nowTs };
       setSyncQueue(prev => [...prev, action]);
       setTimeout(() => processSyncQueue(), 0);
+    }
+  };
+
+  const handleReorderTodo = async (reorderedIds: string[]) => {
+    const nowTs = Date.now();
+    setTodos(prev => {
+      const prevMap = new Map(prev.map(t => [t.id, t]));
+      const updates: Todo[] = [];
+      reorderedIds.forEach((id, index) => {
+        const t = prevMap.get(id);
+        if (t && t.order !== index) {
+          updates.push({ ...t, order: index, updatedAt: nowTs });
+        }
+      });
+      if (updates.length === 0) return prev;
+      return prev.map(t => {
+        const update = updates.find(u => u.id === t.id);
+        return update || t;
+      });
+    });
+
+    if (session) {
+       reorderedIds.forEach((id, index) => {
+          const action: SyncAction = { 
+             id, type: 'UPDATE', payload: { order: index }, timestamp: nowTs 
+          };
+          setSyncQueue(prev => [...prev, action]);
+       });
+       setTimeout(() => processSyncQueue(), 0);
     }
   };
   
@@ -548,6 +580,9 @@ export default function App() {
       } 
       else if (type === 'UPDATE') {
         handleUpdateTodoText(payload.id, payload.text);
+      }
+      else if (type === 'REORDER') {
+        handleReorderTodo(payload.reorderedIds);
       }
       else if (type === 'CX') {
          window.desktopCalendar?.hideTooltip?.();
