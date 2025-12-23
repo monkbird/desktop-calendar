@@ -8,6 +8,16 @@ export interface Todo {
   completedAt?: number;
   createdAt?: number;
   updatedAt?: number;
+  
+  // --- 新增字段 (为了匹配 iOS 版和 Excel 导入导出) ---
+  isLongTerm?: boolean;
+  isPinned?: boolean;
+  startDate?: string;
+  endDate?: string;
+  isAllDay?: boolean;
+  isAllYear?: boolean;
+  isMonth?: boolean;
+  repeat?: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
   order?: number;
 }
 
