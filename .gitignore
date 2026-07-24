@@ -9,3 +9,19 @@ release/
 /.env.local
 .vscode/
 /.trae/
+
+# Electron 运行时文件
+Cache/
+Code Cache/
+GPUCache/
+DawnGraphiteCache/
+DawnWebGPUCache/
+Local Storage/
+Session Storage/
+Network/
+Shared Dictionary/
+WebStorage/
+blob_storage/
+Local State
+Preferences
+SharedStorage

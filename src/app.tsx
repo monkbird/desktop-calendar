@@ -21,6 +21,155 @@ const AuthModal = lazy(() => import('./components/AuthModal').then(module => ({ 
 const SearchModal = lazy(() => import('./components/SearchModal').then(module => ({ default: module.SearchModal })));
 const DataToolsModal = lazy(() => import('./components/DataToolsModal').then(module => ({ default: module.DataToolsModal })));
 
+// --- 移植自 iOS 端的逻辑函数 ---
+
+// 辅助：计算下一个周期日期
+const getNextDate = (dateStr: string, type: 'monthly' | 'yearly') => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const current = new Date(y, m - 1, d);
+  let nextY = current.getFullYear();
+  let nextM = current.getMonth();
+  const day = current.getDate();
+
+  if (type === 'monthly') nextM++;
+  else nextY++;
+  
+  // 处理月底日期（如1月31日下一月无31日的情况）
+  const daysInMonth = new Date(nextY, nextM + 1, 0).getDate();
+  const clampedDay = Math.min(day, daysInMonth);
+  
+  return formatDateKey(new Date(nextY, nextM, clampedDay));
+};
+
+// 逻辑1：迁移过期任务到今天
+const performMigration = (inputTodos: Todo[]) => {
+  const todayKey = formatDateKey(new Date());
+  let hasChanges = false;
+  const newSyncActions: SyncAction[] = [];
+  const now = Date.now();
+
+  const newTodos = inputTodos.map(todo => {
+      // 如果未完成且日期在今天之前（注意：这里不迁移长周期/重复任务，以免逻辑冲突，可视需求调整）
+      if (!todo.completed && todo.targetDate < todayKey && todo.repeat === 'none' && !todo.isLongTerm) {
+          hasChanges = true;
+          const updatedTodo = {
+              ...todo,
+              targetDate: todayKey,
+              updatedAt: now
+          };
+          
+          newSyncActions.push({
+              id: todo.id,
+              type: 'UPDATE',
+              payload: { targetDate: todayKey, updatedAt: now },
+              timestamp: now
+          });
+          
+          return updatedTodo;
+      }
+      return todo;
+  });
+
+  return { newTodos, newSyncActions, hasChanges };
+};
+
+// 逻辑2：检查并生成重复任务
+const checkAndRegenerateRepeatingTodos = (inputTodos: Todo[]) => {
+  const todayKey = formatDateKey(new Date());
+  const now = Date.now();
+  
+  let hasChanges = false;
+  const newSyncActions: SyncAction[] = [];
+  const todosMap = new Map(inputTodos.map(t => [t.id, t]));
+  const addedTodos: Todo[] = [];
+
+  inputTodos.forEach(todo => {
+    // 仅处理月/年重复（日/周重复通常在完成时触发，此处也可扩展）
+    if (todo.repeat !== 'monthly' && todo.repeat !== 'yearly') return;
+
+    const anchorDate = todo.startDate || todo.targetDate;
+    const nextStartKey = getNextDate(anchorDate, todo.repeat as 'monthly' | 'yearly');
+    let nextEndKey: string | undefined;
+    if (todo.endDate) {
+        nextEndKey = getNextDate(todo.endDate, todo.repeat as 'monthly' | 'yearly');
+    }
+
+    if (todo.completed) {
+        // Case A: 已完成 -> 归档旧任务，生成新周期任务
+        const historyId = `${todo.id}_hist_${todo.targetDate}_${now}`;
+        const historyTodo: Todo = {
+            ...todo,
+            id: historyId,
+            isLongTerm: false,
+            repeat: 'none',
+            startDate: undefined,
+            endDate: undefined,
+        };
+        
+        addedTodos.push(historyTodo);
+        newSyncActions.push({ id: historyId, type: 'INSERT', payload: historyTodo, timestamp: now });
+
+        const updatedTodo: Todo = {
+            ...todo,
+            completed: false,
+            completedAt: undefined,
+            targetDate: nextStartKey,
+            startDate: nextStartKey,
+            endDate: nextEndKey,
+            updatedAt: now
+        };
+        
+        todosMap.set(todo.id, updatedTodo);
+        newSyncActions.push({ 
+            id: todo.id, type: 'UPDATE', 
+            payload: { completed: false, completedAt: null as any, targetDate: nextStartKey, startDate: nextStartKey, endDate: nextEndKey, updatedAt: now }, 
+            timestamp: now 
+        });
+        hasChanges = true;
+
+    } else {
+        // Case B: 未完成但已过周期 -> 自动顺延
+        let currentNextStart = nextStartKey;
+        let currentNextEnd = nextEndKey;
+        let shouldUpdate = false;
+
+        // 查找覆盖今天的周期
+        while (todayKey >= currentNextStart) {
+            shouldUpdate = true;
+            const tempNext = getNextDate(currentNextStart, todo.repeat as 'monthly' | 'yearly');
+            if (todayKey >= tempNext) {
+                currentNextStart = tempNext;
+                if (currentNextEnd) currentNextEnd = getNextDate(currentNextEnd, todo.repeat as 'monthly' | 'yearly');
+            } else {
+                break;
+            }
+        }
+        
+        if (shouldUpdate) {
+             const updatedTodo: Todo = {
+                ...todo,
+                targetDate: currentNextStart,
+                startDate: currentNextStart,
+                endDate: currentNextEnd,
+                updatedAt: now
+            };
+            
+            todosMap.set(todo.id, updatedTodo);
+            newSyncActions.push({
+                id: todo.id,
+                type: 'UPDATE',
+                payload: { targetDate: currentNextStart, startDate: currentNextStart, endDate: currentNextEnd, updatedAt: now },
+                timestamp: now
+            });
+            hasChanges = true;
+        }
+    }
+  });
+  
+  if (!hasChanges) return null;
+  return { newTodos: [...Array.from(todosMap.values()), ...addedTodos], newSyncActions };
+};
+
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false); 
@@ -131,7 +280,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const processSyncQueue = async () => {
+const processSyncQueue = async () => {
     if (!session || syncQueue.length === 0) return;
     if (!navigator.onLine) return; 
 
@@ -152,7 +301,15 @@ export default function App() {
             target_date: t.targetDate,
             created_at: new Date(t.createdAt || Date.now()).toISOString(),
             completed_at: t.completedAt ? new Date(t.completedAt).toISOString() : null,
-            updated_at: new Date(t.updatedAt || Date.now()).toISOString()
+            updated_at: new Date(t.updatedAt || Date.now()).toISOString(),
+            // [新增] 字段映射
+            is_long_term: t.isLongTerm,
+            start_date: t.startDate,
+            end_date: t.endDate,
+            is_all_day: t.isAllDay,
+            is_all_year: t.isAllYear,
+            is_month: t.isMonth,
+            repeat: t.repeat
           };
           const res = await supabase.from('todos').insert(dbRow);
           error = res.error;
@@ -165,6 +322,15 @@ export default function App() {
             updates.completed_at = t.completed ? new Date().toISOString() : null;
           }
           if (t.targetDate !== undefined) updates.target_date = t.targetDate;
+          
+          // [新增] 字段更新映射
+          if (t.isLongTerm !== undefined) updates.is_long_term = t.isLongTerm;
+          if (t.startDate !== undefined) updates.start_date = t.startDate;
+          if (t.endDate !== undefined) updates.end_date = t.endDate;
+          if (t.isAllDay !== undefined) updates.is_all_day = t.isAllDay;
+          if (t.isAllYear !== undefined) updates.is_all_year = t.isAllYear;
+          if (t.isMonth !== undefined) updates.is_month = t.isMonth;
+          if (t.repeat !== undefined) updates.repeat = t.repeat;
 
           const res = await supabase.from('todos').update(updates).eq('id', id);
           error = res.error;
@@ -193,7 +359,7 @@ export default function App() {
     return () => window.removeEventListener('online', handleOnline);
   }, [syncQueue, session]);
 
-  const fetchTodos = async () => {
+const fetchTodos = async () => {
     if (!session) return;
     const { data, error } = await supabase.from('todos').select('*');
     if (error) return;
@@ -206,39 +372,52 @@ export default function App() {
         targetDate: d.target_date,
         createdAt: d.created_at ? new Date(d.created_at).getTime() : 0,
         completedAt: d.completed_at ? new Date(d.completed_at).getTime() : undefined,
-        updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : 0 
+        updatedAt: d.updated_at ? new Date(d.updated_at).getTime() : 0,
+        // [新增] 读取字段
+        isLongTerm: d.is_long_term,
+        startDate: d.start_date,
+        endDate: d.end_date,
+        isAllDay: d.is_all_day,
+        isAllYear: d.is_all_year,
+        isMonth: d.is_month,
+        repeat: d.repeat
       }));
 
+      // ... 下面的合并逻辑保持不变 ...
       setTodos(prevLocal => {
-        const localMap = new Map(prevLocal.map(t => [t.id, t]));
-        const merged: Todo[] = [];
-        const processedIds = new Set<string>();
-
-        for (const cTodo of cloudTodos) {
-          processedIds.add(cTodo.id);
-          const lTodo = localMap.get(cTodo.id);
-          const isPendingSync = syncQueue.some(a => a.id === cTodo.id);
-
-          if (!lTodo) {
-            const isPendingDelete = syncQueue.some(a => a.id === cTodo.id && a.type === 'DELETE');
-            if (!isPendingDelete) merged.push(cTodo); 
-          } else {
-            if (isPendingSync) merged.push(lTodo);
-            else {
-              const localTime = lTodo.updatedAt || 0;
-              const cloudTime = cTodo.updatedAt || 0;
-              merged.push(cloudTime > localTime ? cTodo : lTodo);
+         // ... (原有的合并代码) ...
+         // 为了简洁，这里省略原有的合并逻辑代码，请保留原文件中的这部分逻辑
+         const localMap = new Map(prevLocal.map(t => [t.id, t]));
+         const merged: Todo[] = [];
+         const processedIds = new Set<string>();
+         // ...
+         // ...
+         // 确保合并逻辑结束返回 merged
+         for (const cTodo of cloudTodos) {
+            processedIds.add(cTodo.id);
+            const lTodo = localMap.get(cTodo.id);
+            const isPendingSync = syncQueue.some(a => a.id === cTodo.id);
+  
+            if (!lTodo) {
+              const isPendingDelete = syncQueue.some(a => a.id === cTodo.id && a.type === 'DELETE');
+              if (!isPendingDelete) merged.push(cTodo); 
+            } else {
+              if (isPendingSync) merged.push(lTodo);
+              else {
+                const localTime = lTodo.updatedAt || 0;
+                const cloudTime = cTodo.updatedAt || 0;
+                merged.push(cloudTime > localTime ? cTodo : lTodo);
+              }
             }
           }
-        }
-
-        for (const lTodo of prevLocal) {
-          if (!processedIds.has(lTodo.id)) {
-            const isPendingInsert = syncQueue.some(a => a.id === lTodo.id && a.type === 'INSERT');
-            if (isPendingInsert) merged.push(lTodo); 
+  
+          for (const lTodo of prevLocal) {
+            if (!processedIds.has(lTodo.id)) {
+              const isPendingInsert = syncQueue.some(a => a.id === lTodo.id && a.type === 'INSERT');
+              if (isPendingInsert) merged.push(lTodo); 
+            }
           }
-        }
-        return merged;
+          return merged;
       });
     }
   };
@@ -560,6 +739,40 @@ export default function App() {
       setModalEditingId(null);
     }
   };
+
+  // --- [新增] 自动处理规则：迁移过期任务与生成重复任务 ---
+  useEffect(() => {
+    if (todos.length === 0) return;
+
+    let currentTodos = todos;
+    let hasAnyChanges = false;
+    let combinedSyncActions: SyncAction[] = [];
+
+    // 1. 迁移过期
+    const migrationResult = performMigration(currentTodos);
+    if (migrationResult.hasChanges) {
+        currentTodos = migrationResult.newTodos;
+        combinedSyncActions.push(...migrationResult.newSyncActions);
+        hasAnyChanges = true;
+    }
+
+    // 2. 生成重复
+    const regenResult = checkAndRegenerateRepeatingTodos(currentTodos);
+    if (regenResult) {
+        currentTodos = regenResult.newTodos;
+        combinedSyncActions.push(...regenResult.newSyncActions);
+        hasAnyChanges = true;
+    }
+
+    // 如果有变化，更新状态并触发同步
+    if (hasAnyChanges) {
+        console.log('Desktop: Auto-processing todos rules triggered.');
+        setTodos(currentTodos);
+        setSyncQueue(prev => [...prev, ...combinedSyncActions]);
+        // 触发一次同步
+        setTimeout(() => processSyncQueue(), 0);
+    }
+  }, [todos]); // 依赖 todos，当数据变化时重新检查
 
   // --- 监听 Tooltip 子窗口的操作 ---
   useEffect(() => {
