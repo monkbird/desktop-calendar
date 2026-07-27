@@ -8,6 +8,8 @@ interface DataToolsModalProps {
   onClose: () => void;
   todos: Todo[];
   onImport: (newTodos: Todo[]) => Promise<void>;
+  /** bare 模式：只渲染卡片本身（供侧贴菜单窗口内嵌使用），不带遮罩层 */
+  bare?: boolean;
 }
 
 // 定义 Excel 行结构 (扩展以匹配 iOS/CSV 格式)
@@ -43,7 +45,7 @@ interface ExcelRow {
   [key: string]: any;
 }
 
-export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsModalProps) => {
+export const DataToolsModal = ({ isOpen, onClose, todos, onImport, bare = false }: DataToolsModalProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState('');
@@ -392,60 +394,69 @@ export const DataToolsModal = ({ isOpen, onClose, todos, onImport }: DataToolsMo
     reader.readAsBinaryString(file);
   };
 
-  return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in">
-      <div className="w-80 bg-[#1a1b1e] border border-white/10 rounded-xl p-6 shadow-2xl relative animate-in zoom-in-95">
-        <button onClick={onClose} className="absolute top-3 right-3 text-slate-400 hover:text-white">
-          <X size={16} />
-        </button>
+  if (!isOpen) return null;
 
-        <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-          <FileSpreadsheet className="text-emerald-400" />
-          Excel 数据管理
-        </h2>
+  const card = (
+    <div className={`w-80 bg-elevated border border-line rounded-xl p-6 shadow-2xl relative ${bare ? '' : 'animate-in zoom-in-95'}`}>
+      <button onClick={onClose} className="absolute top-3 right-3 text-ink3 hover:text-ink">
+        <X size={16} />
+      </button>
 
-        <div className="space-y-4">
-          <div className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-white/10 transition-colors">
-            <button 
-              onClick={handleExport}
-              className="w-full flex items-center justify-center gap-2 text-sm font-bold text-slate-200 hover:text-emerald-400 transition-colors py-2"
-            >
-              <Download size={16} />
-              导出 Excel
-            </button>
-            <p className="text-[10px] text-slate-500 text-center mt-1">
-              生成 .xlsx 格式文件
-            </p>
-          </div>
+      <h2 className="text-lg font-bold text-ink mb-6 flex items-center gap-2">
+        <FileSpreadsheet className="text-mint" />
+        Excel 数据管理
+      </h2>
 
-          <div className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-white/10 transition-colors">
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importing}
-              className="w-full flex items-center justify-center gap-2 text-sm font-bold text-slate-200 hover:text-emerald-400 transition-colors py-2 disabled:opacity-50"
-            >
-              {importing ? '处理中...' : <><Upload size={16} /> 导入 Excel</>}
-            </button>
-            <input 
-              type="file" 
-              accept=".xlsx, .xls, .csv" 
-              ref={fileInputRef} 
-              className="hidden" 
-              onChange={handleFileChange}
-            />
-            <p className="text-[10px] text-slate-500 text-center mt-1 flex items-center justify-center gap-1">
-              <AlertTriangle size={10} className="text-yellow-500" />
-              兼容日期字符串和 Excel 时间格式
-            </p>
-          </div>
+      <div className="space-y-4">
+        <div className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-line transition-colors">
+          <button
+            onClick={handleExport}
+            className="w-full flex items-center justify-center gap-2 text-sm font-bold text-ink2 hover:text-mint transition-colors py-2"
+          >
+            <Download size={16} />
+            导出 Excel
+          </button>
+          <p className="text-[10px] text-ink3 text-center mt-1">
+            生成 .xlsx 格式文件
+          </p>
         </div>
 
-        {msg && (
-          <div className="mt-4 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded text-center text-xs text-emerald-400 flex items-center justify-center gap-2 animate-in fade-in slide-in-from-bottom-2">
-            <Check size={12} /> {msg}
-          </div>
-        )}
+        <div className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-line transition-colors">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="w-full flex items-center justify-center gap-2 text-sm font-bold text-ink2 hover:text-mint transition-colors py-2 disabled:opacity-50"
+          >
+            {importing ? '处理中...' : <><Upload size={16} /> 导入 Excel</>}
+          </button>
+          <input
+            type="file"
+            accept=".xlsx, .xls, .csv"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <p className="text-[10px] text-ink3 text-center mt-1 flex items-center justify-center gap-1">
+            <AlertTriangle size={10} className="text-warn" />
+            兼容日期字符串和 Excel 时间格式
+          </p>
+        </div>
       </div>
+
+      {msg && (
+        <div className="mt-4 p-2 bg-mint-dim border border-mint/20 rounded text-center text-xs text-mint flex items-center justify-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+          <Check size={12} /> {msg}
+        </div>
+      )}
+    </div>
+  );
+
+  // bare 模式：仅卡片（嵌入侧贴菜单窗口）
+  if (bare) return card;
+
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in">
+      {card}
       <div className="absolute inset-0 -z-10" onClick={onClose} />
     </div>
   );

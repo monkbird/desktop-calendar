@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useLayoutEffect, useMemo, lazy, Suspense, useCallback } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { 
-  Calendar as CalendarIcon, 
-  RotateCcw, Lock, Unlock, Minus, Square, 
+import {
+  Calendar as CalendarIcon,
+  RotateCcw, Lock, Unlock, Minus, Square,
   ChevronLeft, ChevronRight, X, Check, Trash2,
   History, User as UserIcon, Search, Database,
-  ChevronDown, Sliders 
+  ChevronDown, Sliders, Palette
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
+import { THEMES, applyTheme, getStoredThemeId, getTheme } from './theme';
 import type { Todo, SyncAction } from './types';
 import { 
   CHINESE_NUMS, getDaysInMonth, getFirstDayOfMonth, formatDateKey, getDateInfo 
@@ -16,10 +17,7 @@ import { CalendarCell } from './components/CalendarCell';
 import { supabase } from './supabase';
 
 // [优化] 懒加载非首屏组件，减少初始内存占用
-const HistoryModal = lazy(() => import('./components/HistoryModal').then(module => ({ default: module.HistoryModal })));
 const AuthModal = lazy(() => import('./components/AuthModal').then(module => ({ default: module.AuthModal })));
-const SearchModal = lazy(() => import('./components/SearchModal').then(module => ({ default: module.SearchModal })));
-const DataToolsModal = lazy(() => import('./components/DataToolsModal').then(module => ({ default: module.DataToolsModal })));
 
 // --- 移植自 iOS 端的逻辑函数 ---
 
@@ -172,24 +170,24 @@ const checkAndRegenerateRepeatingTodos = (inputTodos: Todo[]) => {
 
 export default function App() {
   const [isLocked, setIsLocked] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false); 
-  const [isHoverExpanded, setIsHoverExpanded] = useState(false); 
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false); 
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isHoverExpanded, setIsHoverExpanded] = useState(false);
 
-  // 年份和月份选择器的显示状态
-  const [showYearPicker, setShowYearPicker] = useState(false);
-  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  // 窗口内下拉菜单（桌面日历）
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
+  // 主题色选择下拉
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  const [themeId, setThemeId] = useState(getStoredThemeId);
+  // 侧贴菜单弹窗（选择器 + 数据面板），同一时间只开一个
+  const [activeMenu, setActiveMenu] = useState<'year' | 'month' | 'opacity' | 'search' | 'history' | 'datatools' | null>(null);
 
   // 透明度调节状态
-  const [isOpacityMenuOpen, setIsOpacityMenuOpen] = useState(false);
   const [bgOpacity, setBgOpacity] = useState(() => {
     const saved = localStorage.getItem('desktop-bg-opacity');
     return saved ? parseFloat(saved) : 0.5; 
   });
 
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isDataToolsOpen, setIsDataToolsOpen] = useState(false);
+  // 搜索/历史归档/数据管理已迁移到侧贴菜单窗口（activeMenu），不再使用窗口内弹窗状态
 
   const contentRef = useRef<HTMLDivElement>(null);
   const detailScrollRef = useRef<HTMLDivElement | null>(null);
@@ -221,11 +219,14 @@ export default function App() {
     ];
   });
   
-  // 默认日期初始化为 2025年 12月
-  const [currentDate, setCurrentDate] = useState(new Date(2025, 11, 1));
+  // 默认显示当月
+  const [currentDate, setCurrentDate] = useState(new Date());
 
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
+
+  // 搜索跳转后的目标日期高亮（2 秒闪烁后自动消除）
+  const [flashDateKey, setFlashDateKey] = useState<string | null>(null);
   
   const [nowDate, setNowDate] = useState(new Date());
 
@@ -241,17 +242,16 @@ export default function App() {
 
   // 汇总所有弹窗/交互状态。只要这里有一个为 true，就不允许自动收起
   const isAnyPopupOpen = useMemo(() => {
-    return isToolsMenuOpen || 
-           isOpacityMenuOpen || 
-           !!selectedDateKey || 
-           isHistoryOpen || 
-           isSearchOpen || 
-           isDataToolsOpen || 
-           showAuth || 
-           !!activeTooltipDate ||
-           showYearPicker || 
-           showMonthPicker;   
-  }, [isToolsMenuOpen, isOpacityMenuOpen, selectedDateKey, isHistoryOpen, isSearchOpen, isDataToolsOpen, showAuth, activeTooltipDate, showYearPicker, showMonthPicker]);
+    return !!activeMenu ||
+           isToolsMenuOpen ||
+           isThemeMenuOpen ||
+           !!selectedDateKey ||
+           showAuth ||
+           !!activeTooltipDate;
+  }, [activeMenu, isToolsMenuOpen, isThemeMenuOpen, selectedDateKey, showAuth, activeTooltipDate]);
+
+  // 启动时应用存储的主题色
+  useEffect(() => { applyTheme(themeId); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     localStorage.setItem('desktop-sync-queue', JSON.stringify(syncQueue));
@@ -267,6 +267,13 @@ export default function App() {
       window.desktopCalendar?.updateTooltipData?.({ dateKey: activeTooltipDate, tasks });
     }
   }, [todos, activeTooltipDate]); // tooltip 打开时推送数据，todos 变化时同步更新
+
+  // todos 变化时实时同步到打开的数据面板（搜索/历史归档/数据管理）
+  useEffect(() => {
+    if (activeMenu === 'search' || activeMenu === 'history' || activeMenu === 'datatools') {
+      window.desktopCalendar?.updateMenuData?.({ mode: activeMenu, data: { todos } });
+    }
+  }, [todos, activeMenu]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -309,9 +316,18 @@ const processSyncQueue = async () => {
             is_all_day: t.isAllDay,
             is_all_year: t.isAllYear,
             is_month: t.isMonth,
-            repeat: t.repeat
+            repeat: t.repeat,
+            order: t.order,
+            is_pinned: t.isPinned
           };
-          const res = await supabase.from('todos').insert(dbRow);
+          let res = await supabase.from('todos').insert(dbRow);
+          // [容错] 云端表若缺少可选列（order / is_pinned），PostgREST 会报 PGRST204。
+          // 剔除可选列重试一次，避免该操作永久卡在同步队列里反复重试
+          if (res.error?.code === 'PGRST204') {
+            delete (dbRow as any).order;
+            delete (dbRow as any).is_pinned;
+            res = await supabase.from('todos').insert(dbRow);
+          }
           error = res.error;
         } else if (type === 'UPDATE') {
           const t = payload as Partial<Todo>;
@@ -331,8 +347,16 @@ const processSyncQueue = async () => {
           if (t.isAllYear !== undefined) updates.is_all_year = t.isAllYear;
           if (t.isMonth !== undefined) updates.is_month = t.isMonth;
           if (t.repeat !== undefined) updates.repeat = t.repeat;
+          if (t.order !== undefined) updates.order = t.order;
+          if (t.isPinned !== undefined) updates.is_pinned = t.isPinned;
 
-          const res = await supabase.from('todos').update(updates).eq('id', id);
+          let res = await supabase.from('todos').update(updates).eq('id', id);
+          // [容错] 同上：云端缺少 order / is_pinned 列时剔除后重试一次
+          if (res.error?.code === 'PGRST204') {
+            delete updates.order;
+            delete updates.is_pinned;
+            res = await supabase.from('todos').update(updates).eq('id', id);
+          }
           error = res.error;
         } else if (type === 'DELETE') {
           const res = await supabase.from('todos').delete().eq('id', id);
@@ -380,19 +404,16 @@ const fetchTodos = async () => {
         isAllDay: d.is_all_day,
         isAllYear: d.is_all_year,
         isMonth: d.is_month,
-        repeat: d.repeat
+        repeat: d.repeat,
+        order: d.order,
+        isPinned: d.is_pinned
       }));
 
-      // ... 下面的合并逻辑保持不变 ...
+      // 合并云端与本地数据：同一条目按 updatedAt 取较新者；有未推送的本地操作时以本地为准
       setTodos(prevLocal => {
-         // ... (原有的合并代码) ...
-         // 为了简洁，这里省略原有的合并逻辑代码，请保留原文件中的这部分逻辑
          const localMap = new Map(prevLocal.map(t => [t.id, t]));
          const merged: Todo[] = [];
          const processedIds = new Set<string>();
-         // ...
-         // ...
-         // 确保合并逻辑结束返回 merged
          for (const cTodo of cloudTodos) {
             processedIds.add(cTodo.id);
             const lTodo = localMap.get(cTodo.id);
@@ -436,21 +457,36 @@ const fetchTodos = async () => {
 
   const isEffectivelyOpen = !isCollapsed || isHoverExpanded || isAnyPopupOpen;
 
+  // 关闭侧贴菜单弹窗（IPC 隐藏窗口 + 清本地状态）
+  const closeMenu = () => {
+    window.desktopCalendar?.hideMenu?.();
+    setActiveMenu(null);
+  };
+
+  // 打开侧贴数据面板（搜索/历史归档/数据管理）
+  const openMenuPanel = (mode: 'search' | 'history' | 'datatools') => {
+    // 与任务子窗口、窗口内下拉互斥
+    window.desktopCalendar?.hideTooltip?.();
+    setActiveTooltipDate(null);
+    setIsToolsMenuOpen(false);
+    setIsThemeMenuOpen(false);
+    window.desktopCalendar?.showMenu?.({ mode, data: { todos } });
+    setActiveMenu(mode);
+  };
+
   // 调度收起
   const scheduleCollapse = () => {
     if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
-    
+
     // 0.2秒后尝试收起
     collapseTimerRef.current = setTimeout(() => {
       // 再次检查：如果有弹窗，或者鼠标又回来了，就不收起
       if (isAnyPopupOpen || isMouseInsideRef.current) return;
-      
+
       setIsHoverExpanded(false);
-      // 同时关闭可能还开着的非模态菜单（双重保险）
+      // 同时关闭可能还开着的菜单（双重保险）
       setIsToolsMenuOpen(false);
-      setIsOpacityMenuOpen(false);
-      setShowYearPicker(false);
-      setShowMonthPicker(false);
+      closeMenu();
     }, 200);
   };
 
@@ -491,9 +527,16 @@ const fetchTodos = async () => {
     const now = new Date();
     const night = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
     const msToMidnight = night.getTime() - now.getTime();
-    const timer = setTimeout(() => { setNowDate(new Date()); }, msToMidnight + 1000); 
+    const timer = setTimeout(() => { setNowDate(new Date()); }, msToMidnight + 1000);
     return () => clearTimeout(timer);
-  }, [nowDate]); 
+  }, [nowDate]);
+
+  // 搜索跳转的目标日期高亮 2 秒后自动消除
+  useEffect(() => {
+    if (!flashDateKey) return;
+    const timer = setTimeout(() => setFlashDateKey(null), 2000);
+    return () => clearTimeout(timer);
+  }, [flashDateKey]);
 
   useEffect(() => {
     localStorage.setItem('desktop-todos-v8', JSON.stringify(todos));
@@ -534,15 +577,15 @@ const fetchTodos = async () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        if (!isSearchOpen) {
-          setIsSearchOpen(true);
+        if (activeMenu !== 'search') {
+          openMenuPanel('search');
           e.preventDefault();
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSearchOpen]);
+  }, [activeMenu, todos]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -622,6 +665,37 @@ const fetchTodos = async () => {
   const getMonthlyCompleted = (y: number, m: number) => {
     const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
     return todos.filter(t => t.completed && t.targetDate.startsWith(prefix)).length;
+  };
+
+  // 年份/月份选择器数据
+  const startYear = 2020;
+  const yearsList = Array.from({ length: 20 }, (_, i) => startYear + i); // 2020-2039
+  const monthsList = Array.from({ length: 12 }, (_, i) => i);
+
+  // --- 侧贴菜单弹窗：打开/切换（选择器类） ---
+  const toggleMenu = (mode: 'year' | 'month' | 'opacity') => {
+    if (activeMenu === mode) {
+      closeMenu();
+      return;
+    }
+    // 与任务子窗口、窗口内下拉互斥
+    window.desktopCalendar?.hideTooltip?.();
+    setActiveTooltipDate(null);
+    setIsToolsMenuOpen(false);
+    setIsThemeMenuOpen(false);
+
+    const y = currentDate.getFullYear();
+    const m = currentDate.getMonth();
+    let data: any = null;
+    if (mode === 'year') {
+      data = { current: y, items: yearsList.map(yy => ({ value: yy, count: getYearlyCompleted(yy) })) };
+    } else if (mode === 'month') {
+      data = { current: m, items: monthsList.map(mm => ({ value: mm, count: getMonthlyCompleted(y, mm) })) };
+    } else if (mode === 'opacity') {
+      data = { value: bgOpacity };
+    }
+    window.desktopCalendar?.showMenu?.({ mode, data });
+    setActiveMenu(mode);
   };
 
   // --- CRUD 操作 ---
@@ -803,7 +877,50 @@ const fetchTodos = async () => {
       }
     });
     return () => removeListener?.();
-  }, [todos]); 
+  }, [todos]);
+
+  // --- 监听菜单窗口的操作 ---
+  useEffect(() => {
+    const removeListener = window.desktopCalendar?.onMenuAction?.((action) => {
+      const { type, payload } = action;
+
+      // 菜单侧自动关闭（鼠标移出超时）
+      if (type === 'CX') {
+        closeMenu();
+        return;
+      }
+
+      if (type === 'SELECT_YEAR') {
+        setCurrentDate(new Date(payload.year, currentDate.getMonth(), 1));
+        closeMenu();
+      }
+      else if (type === 'SELECT_MONTH') {
+        setCurrentDate(new Date(currentDate.getFullYear(), payload.month, 1));
+        closeMenu();
+      }
+      else if (type === 'NAVIGATE') {
+        const d = new Date(payload.y, payload.m, payload.d);
+        setCurrentDate(d);
+        // 跳转后高亮闪烁目标日期，让落点可见
+        setFlashDateKey(formatDateKey(d));
+        closeMenu();
+      }
+      else if (type === 'TOGGLE_TODO') {
+        handleToggleTodo(payload.id);
+      }
+      else if (type === 'DELETE_TODO') {
+        handleDeleteTodo(payload.id);
+      }
+      else if (type === 'IMPORT_TODOS') {
+        handleBatchImport(payload.todos);
+      }
+      else if (type === 'SET_OPACITY') {
+        // 拖动滑块时实时生效，不关闭菜单
+        setBgOpacity(payload.value);
+      }
+    });
+    return () => removeListener?.();
+  }, [currentDate, todos]);
 
   // --- 鼠标交互 (核心修改) ---
 
@@ -851,12 +968,14 @@ const fetchTodos = async () => {
     tooltipTimerRef.current = setTimeout(() => {
       setActiveTooltipDate(dateKey);
 
-      // showTooltip 只负责定位窗口，数据由 useEffect [todos, activeTooltipDate] 统一推送
+      // showTooltip 携带数据（主进程附加 freshShow 标记后推送，用于重置入场动画状态）；
+      // 后续 todos 变化由 useEffect [todos, activeTooltipDate] 经 updateTooltipData 增量推送
       window.desktopCalendar?.showTooltip?.({
         x: rect.right,
         y: rect.top,
         width: rect.width,
-        height: rect.height
+        height: rect.height,
+        data: { dateKey, tasks }
       });
     }, 240);
   }, [isResizing, getTasksForDate]);
@@ -870,14 +989,12 @@ const fetchTodos = async () => {
   }, []);
 
   const handleAppClick = () => {
-    // 点击空白处，关闭一些轻量级菜单
+    // 点击空白处，关闭任务子窗口与菜单
     window.desktopCalendar?.hideTooltip?.();
     setActiveTooltipDate(null);
-    setIsToolsMenuOpen(false); 
-    setIsOpacityMenuOpen(false); 
-    // [新增] 关闭日期选择器
-    setShowYearPicker(false);
-    setShowMonthPicker(false);
+    setIsToolsMenuOpen(false);
+    setIsThemeMenuOpen(false);
+    closeMenu();
   };
 
   // --- 日历生成 ---
@@ -902,11 +1019,12 @@ const fetchTodos = async () => {
     const highlightText = festival || term;
 
     calendarCells.push(
-      <CalendarCell 
+      <CalendarCell
         key={`prev-${dateKey}`}
         day={dayNum}
         dateKey={dateKey}
         isToday={false}
+        isFlashed={dateKey === flashDateKey}
         tasks={getTasksForDate(dateKey)}
         term={highlightText}
         lunar={lunarText}
@@ -928,11 +1046,12 @@ const fetchTodos = async () => {
     const highlightText = festival || term; 
     
     calendarCells.push(
-      <CalendarCell 
+      <CalendarCell
         key={dateKey}
         day={i}
         dateKey={dateKey}
         isToday={isToday}
+        isFlashed={dateKey === flashDateKey}
         tasks={getTasksForDate(dateKey)}
         term={highlightText}
         lunar={lunarText}
@@ -954,11 +1073,12 @@ const fetchTodos = async () => {
     const highlightText = festival || term;
 
     calendarCells.push(
-      <CalendarCell 
+      <CalendarCell
         key={`next-${dateKey}`}
         day={i}
         dateKey={dateKey}
         isToday={false}
+        isFlashed={dateKey === flashDateKey}
         tasks={getTasksForDate(dateKey)}
         term={highlightText}
         lunar={lunarText}
@@ -994,11 +1114,6 @@ const fetchTodos = async () => {
     }
   }, [rowCount, currentDate, isCollapsed, isHoverExpanded, isAnyPopupOpen]); 
   
-  // 辅助数据：年份列表和月份列表
-  const startYear = 2020;
-  const yearsList = Array.from({ length: 20 }, (_, i) => startYear + i); // 2020-2039
-  const monthsList = Array.from({ length: 12 }, (_, i) => i);
-
   return (
     <div 
       // 绑定鼠标事件到最外层
@@ -1009,12 +1124,12 @@ const fetchTodos = async () => {
     >
       <div 
         ref={contentRef} 
-        // [核心修改] 动态背景 + 锁定时移除所有框体效果(border, shadow, ring, blur)
-        style={{ backgroundColor: `rgba(0, 0, 0, ${bgOpacity})` }}
+        // [核心修改] 动态背景（跟随主题底色） + 锁定时移除所有框体效果(border, shadow, ring, blur)
+        style={{ backgroundColor: `rgba(${getTheme(themeId).colors.baseRGB}, ${bgOpacity})` }}
         className={`w-full h-fit flex flex-col transition-all duration-300 rounded-xl overflow-hidden
           ${isLocked 
             ? 'border-transparent shadow-none backdrop-blur-none ring-0' 
-            : 'border border-white/10 ring-1 ring-black/20 shadow-2xl backdrop-blur-xl'
+            : 'border border-line ring-1 ring-black/20 shadow-2xl backdrop-blur-xl'
           }
           ${!isEffectivelyOpen ? 'rounded-b-xl' : ''} 
         `}
@@ -1024,193 +1139,152 @@ const fetchTodos = async () => {
           onMouseEnter={() => { if (isCollapsed) setIsHoverExpanded(true); }}
           className={`h-8 flex items-center justify-between px-3 bg-white/5 flex-shrink-0 relative 
             ${isEffectivelyOpen ? 'border-b' : ''} 
-            ${isLocked ? 'border-transparent' : 'border-white/10'}
+            ${isLocked ? 'border-transparent' : 'border-line'}
           `}
         >
           {!isLocked && <div className="absolute inset-0 drag-region pointer-events-none" />}
           {/* 左侧：图标 + 下拉菜单触发器 */}
           <div className="flex items-center gap-1 min-w-0">
-            <CalendarIcon size={16} className="text-emerald-400 flex-shrink-0" />
-            <button 
-               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); setIsOpacityMenuOpen(false); setShowYearPicker(false); setShowMonthPicker(false); }}
-               className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors no-drag group"
+            <CalendarIcon size={16} className="text-mint flex-shrink-0" />
+            <button
+               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); setIsThemeMenuOpen(false); closeMenu(); }}
+               className="flex items-center gap-1 hover:bg-hover px-1.5 py-0.5 rounded transition-colors no-drag group"
             >
-               <span className="text-sm font-medium text-slate-200">桌面日历</span>
-               <ChevronDown size={12} className={`text-slate-400 transition-transform duration-200 ${isToolsMenuOpen ? 'rotate-180 text-emerald-400' : 'group-hover:text-emerald-400'}`} />
+               <span className="text-sm font-medium text-ink">桌面日历</span>
+               <ChevronDown size={12} className={`text-ink3 transition-transform duration-200 ${isToolsMenuOpen ? 'rotate-180 text-mint' : 'group-hover:text-mint'}`} />
             </button>
           </div>
 
           {/* 右侧：功能按钮区 */}
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
-             {/* 透明度调节按钮 */}
-             <div className="relative">
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setIsOpacityMenuOpen(!isOpacityMenuOpen); setIsToolsMenuOpen(false); }}
-                  className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isOpacityMenuOpen ? 'text-emerald-400' : 'text-slate-400 hover:text-white'}`}
-                  title="调节透明度"
-                >
-                  <Sliders size={14} />
-                </button>
-                {/* 透明度调节条弹窗 */}
-                {isOpacityMenuOpen && (
-                  <div 
-                    onClick={(e) => e.stopPropagation()} 
-                    className="absolute top-full right-0 mt-2 p-2 bg-[#25262b] border border-white/10 rounded-lg w-32 shadow-xl z-50 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2"
-                  >
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                      <span>透明度</span>
-                      <span>{Math.round(bgOpacity * 100)}%</span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0.1" 
-                      max="0.9" 
-                      step="0.05" 
-                      value={bgOpacity}
-                      onChange={(e) => setBgOpacity(parseFloat(e.target.value))}
-                      className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-emerald-400" 
-                    />
-                  </div>
-                )}
-             </div>
+             {/* 主题色按钮 */}
+             <button
+               onClick={(e) => { e.stopPropagation(); setIsThemeMenuOpen(!isThemeMenuOpen); setIsToolsMenuOpen(false); closeMenu(); }}
+               className={`p-1.5 rounded hover:bg-hover transition-colors ${isThemeMenuOpen ? 'text-mint' : 'text-ink3 hover:text-ink'}`}
+               title="主题颜色"
+             >
+               <Palette size={14} />
+             </button>
 
-             <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isLocked ? 'text-red-400' : 'text-slate-400 hover:text-white'}`} title={isLocked ? "解锁窗口" : "锁定位置"}>
+             {/* 透明度调节按钮 */}
+             <button
+               onClick={(e) => { e.stopPropagation(); toggleMenu('opacity'); }}
+               className={`p-1.5 rounded hover:bg-hover transition-colors ${activeMenu === 'opacity' ? 'text-mint' : 'text-ink3 hover:text-ink'}`}
+               title="调节透明度"
+             >
+               <Sliders size={14} />
+             </button>
+
+             <button onClick={() => setIsLocked(!isLocked)} className={`p-1.5 rounded hover:bg-hover transition-colors ${isLocked ? 'text-danger' : 'text-ink3 hover:text-ink'}`} title={isLocked ? "解锁窗口" : "锁定位置"}>
                {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
              </button>
-             <button onClick={() => setIsCollapsed(!isCollapsed)} className={`p-1.5 rounded hover:bg-white/10 transition-colors ${isCollapsed ? 'text-emerald-400' : 'text-slate-400 hover:text-white'}`} title={isCollapsed ? "展开" : "卷起"}>
+             <button onClick={() => setIsCollapsed(!isCollapsed)} className={`p-1.5 rounded hover:bg-hover transition-colors ${isCollapsed ? 'text-mint' : 'text-ink3 hover:text-ink'}`} title={isCollapsed ? "展开" : "卷起"}>
                {isCollapsed ? <Square size={14} /> : <Minus size={14} />}
              </button>
           </div>
 
-          {/* --- 下拉菜单 --- */}
+          {/* --- 下拉菜单（窗口内，保持旧样式） --- */}
           {isToolsMenuOpen && (
-            <div className="absolute top-full left-2 mt-1 z-50 bg-[#25262b] border border-white/10 rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[130px] animate-in fade-in slide-in-from-top-2 no-drag">
-               <button onClick={() => { setIsSearchOpen(true); setIsToolsMenuOpen(false); }} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded text-left transition-colors">
+            <div
+              // 阻止冒泡：否则点击项会冒泡到根节点 handleAppClick，刚打开的侧贴面板会被立刻关闭
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-full left-2 mt-1 z-50 bg-elevated border border-line rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[130px] no-drag"
+            >
+               <button onClick={() => openMenuPanel('search')} className="flex items-center gap-2 px-2 py-1.5 text-xs text-ink2 hover:bg-hover hover:text-mint rounded text-left transition-colors animate-toolbar-stagger" style={{ animationDelay: '0ms' }}>
                  <Search size={14} /> 搜索事项
                </button>
-               <button onClick={() => { setIsDataToolsOpen(true); setIsToolsMenuOpen(false); }} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded text-left transition-colors">
+               <button onClick={() => openMenuPanel('datatools')} className="flex items-center gap-2 px-2 py-1.5 text-xs text-ink2 hover:bg-hover hover:text-mint rounded text-left transition-colors animate-toolbar-stagger" style={{ animationDelay: '110ms' }}>
                  <Database size={14} /> 数据管理
                </button>
-               <button onClick={() => { setIsHistoryOpen(true); setIsToolsMenuOpen(false); }} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-emerald-400 rounded text-left transition-colors">
+               <button onClick={() => openMenuPanel('history')} className="flex items-center gap-2 px-2 py-1.5 text-xs text-ink2 hover:bg-hover hover:text-mint rounded text-left transition-colors animate-toolbar-stagger" style={{ animationDelay: '220ms' }}>
                  <History size={14} /> 历史归档
                </button>
-               
-               <div className="h-[1px] bg-white/10 my-0.5"></div>
-               
-               <button 
+
+               <div className="h-[1px] bg-line my-0.5"></div>
+
+               <button
                  onClick={() => { if (!session) { setShowAuth(true); setIsToolsMenuOpen(false); } }}
-                 className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded text-left transition-colors ${session ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-300 hover:bg-white/10 hover:text-emerald-400'}`}
+                 className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded text-left transition-colors animate-toolbar-stagger ${session ? 'text-mint bg-mint-dim' : 'text-ink2 hover:bg-hover hover:text-mint'}`}
+                 style={{ animationDelay: '330ms' }}
                >
                  <UserIcon size={14} />
                  {session ? '已同步' : '登录/注册'}
                </button>
                {session && (
-                  <button 
+                  <button
                     onClick={async () => { await supabase.auth.signOut(); setIsToolsMenuOpen(false); }}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-red-400 hover:bg-white/10 rounded text-left transition-colors mt-1"
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-danger hover:bg-hover rounded text-left transition-colors animate-toolbar-stagger mt-1"
+                    style={{ animationDelay: '440ms' }}
                   >
                     退出登录
                   </button>
                )}
             </div>
           )}
+
+          {/* --- 主题色下拉（窗口内） --- */}
+          {isThemeMenuOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-full right-2 mt-1 z-50 bg-elevated border border-line rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[120px] no-drag"
+            >
+              {THEMES.map((t, i) => (
+                <button
+                  key={t.id}
+                  onClick={() => { setThemeId(t.id); applyTheme(t.id); }}
+                  className="flex items-center gap-2 px-2 py-1.5 text-xs rounded text-left transition-colors hover:bg-hover animate-toolbar-stagger"
+                  style={{ animationDelay: `${i * 110}ms` }}
+                >
+                  <span
+                    className="w-3 h-3 rounded-full flex-shrink-0 ring-1 ring-white/20"
+                    style={{ background: `linear-gradient(135deg, ${t.colors.mint} 0%, ${t.colors.mintDeep} 100%)` }}
+                  />
+                  <span className={t.id === themeId ? 'text-mint font-medium' : 'text-ink2'}>{t.name}</span>
+                  {t.id === themeId && <Check size={12} className="ml-auto text-mint" />}
+                </button>
+              ))}
+            </div>
+          )}
+
         </div>
 
         {/* --- 主体内容 --- */}
         <div className={`flex-1 flex flex-col min-h-0 relative transition-opacity duration-200 ${isEffectivelyOpen ? 'opacity-100' : 'opacity-0 pointer-events-none h-0'}`}>
           <div className="flex items-center justify-between px-2 py-0.1 bg-white/5 flex-shrink-0">
              {/* [修改] 网格选择器布局 */}
-             <div className="flex items-center gap-0.5 text-lg font-light text-white relative">
+             <div className="flex items-center gap-0.5 text-xl font-medium text-ink tabular-nums relative">
                
                {/* 年份触发器 */}
-               <button 
-                 onClick={(e) => { e.stopPropagation(); setShowYearPicker(!showYearPicker); setShowMonthPicker(false); }}
-                 className="hover:text-emerald-400 hover:bg-white/10 px-0.6 rounded transition-colors no-drag"
+               <button
+                 onClick={(e) => { e.stopPropagation(); toggleMenu('year'); }}
+                 className={`hover:text-mint hover:bg-hover px-0.6 rounded transition-colors no-drag ${activeMenu === 'year' ? 'text-mint' : ''}`}
                >
                  {year}
                </button>
-               <span className="px-0.3 text-white font-light">年</span>
-               
-               {/* 年份网格弹窗 (修改：去除间距 gap-0，最大化字体) */}
-               {showYearPicker && (
-                 <div 
-                   onClick={(e) => e.stopPropagation()}
-                   className="absolute top-full left-0 mt-2 p-2 bg-[#25262b] border border-white/10 rounded-lg shadow-xl z-50 w-72 animate-in fade-in slide-in-from-top-2 no-drag"
-                 >
-                   {/* 修改：gap-0 */}
-                   <div className="grid grid-cols-4 gap-0">
-                     {yearsList.map(y => {
-                       const count = getYearlyCompleted(y);
-                       return (
-                         <button
-                           key={y}
-                           onClick={() => {
-                             setCurrentDate(new Date(y, month, 1));
-                             setShowYearPicker(false);
-                           }}
-                           // 修改：w-full, h-full, py-3, text-1xl
-                           className={`w-full flex flex-col items-center justify-center py-2 rounded hover:bg-white/10 transition-colors ${y === year ? 'bg-emerald-600/20 text-emerald-400 font-bold' : 'text-slate-300'}`}
-                         >
-                           <span className="text-1xl leading-none">{y}</span>
-                           <span className="text-[12px] text-slate-500 scale-90 mt-0.5">完成: {count}</span>
-                         </button>
-                       );
-                     })}
-                   </div>
-                 </div>
-               )}
-               
+               <span className="px-0.5 text-sm text-ink3">年</span>
+
                {/* 月份触发器 */}
-               <button 
-                 onClick={(e) => { e.stopPropagation(); setShowMonthPicker(!showMonthPicker); setShowYearPicker(false); }}
-                 className="hover:text-emerald-400 hover:bg-white/10 px-0.6 rounded transition-colors no-drag ml-1"
+               <button
+                 onClick={(e) => { e.stopPropagation(); toggleMenu('month'); }}
+                 className={`hover:text-mint hover:bg-hover px-0.6 rounded transition-colors no-drag ml-1 ${activeMenu === 'month' ? 'text-mint' : ''}`}
                >
                  {String(month + 1).padStart(2, '0')}
                </button>
-               <span className="px-0.3 text-white font-light">月</span>
-
-               {/* 月份网格弹窗 (修改：去除间距 gap-0，最大化字体) */}
-               {showMonthPicker && (
-                 <div 
-                   onClick={(e) => e.stopPropagation()}
-                   className="absolute top-full left-10 mt-2 p-2 bg-[#25262b] border border-white/10 rounded-lg shadow-xl z-50 w-64 animate-in fade-in slide-in-from-top-2 no-drag"
-                 >
-                   {/* 修改：gap-0 */}
-                   <div className="grid grid-cols-3 gap-0">
-                     {monthsList.map(m => {
-                        const count = getMonthlyCompleted(year, m);
-                        return (
-                         <button
-                           key={m}
-                           onClick={() => {
-                             setCurrentDate(new Date(year, m, 1));
-                             setShowMonthPicker(false);
-                           }}
-                           // 修改：w-full, h-full, py-2, text-1xl
-                           className={`w-full flex flex-col items-center justify-center py-1 rounded hover:bg-white/10 transition-colors ${m === month ? 'bg-emerald-600/20 text-emerald-400 font-bold' : 'text-slate-300'}`}
-                         >
-                           <span className="text-1xl leading-none">{m + 1}月</span>
-                           <span className="text-[12px] text-slate-500 scale-90 mt-0.5">完成: {count}</span>
-                         </button>
-                       );
-                     })}
-                   </div>
-                 </div>
-               )}
+               <span className="px-0.5 text-sm text-ink3">月</span>
              </div>
 
              <div className="flex gap-1 no-drag">
-               <button onClick={() => setCurrentDate(new Date())} className="p-1 hover:bg-white/10 rounded text-emerald-400" title="回到今天"><RotateCcw size={14} /></button>
+               <button onClick={() => setCurrentDate(new Date())} className="p-1 hover:bg-hover rounded text-mint" title="回到今天"><RotateCcw size={14} /></button>
                <div className="flex bg-white/5 rounded">
-                 <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="p-1 hover:bg-white/10 rounded-l text-slate-300"><ChevronLeft size={16} /></button>
-                 <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="p-1 hover:bg-white/10 rounded-r text-slate-300"><ChevronRight size={16} /></button>
+                 <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="p-1 hover:bg-hover rounded-l text-ink2"><ChevronLeft size={16} /></button>
+                 <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="p-1 hover:bg-hover rounded-r text-ink2"><ChevronRight size={16} /></button>
                </div>
              </div>
           </div>
 
           <div className="grid grid-cols-7 border-b border-white/5 bg-black/10 flex-shrink-0">
             {CHINESE_NUMS.slice(0, 7).map((d,i)=>(
-              <div key={i} className="text-[10px] text-slate-200 py-1 text-center">{d}</div>
+              <div key={i} className="text-[10px] text-ink2 tracking-wider py-1 text-center">{d}</div>
             ))}
           </div>
 
@@ -1223,7 +1297,7 @@ const fetchTodos = async () => {
               onMouseDown={startResize}
               className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-end justify-end p-0.5 z-20 group hover:bg-white/5 rounded-tl no-drag"
             >
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="text-slate-600 group-hover:text-emerald-400 transition-colors">
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="text-ink3 group-hover:text-mint transition-colors">
                  <path d="M11 1L11 11L1 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
               </svg>
             </div>
@@ -1233,19 +1307,19 @@ const fetchTodos = async () => {
         {/* --- 双击详情弹窗 --- */}
         {selectedDateKey && (!isCollapsed || isHoverExpanded) && (
           <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-             <div className="w-full max-w-[320px] bg-[#25262b]/90 backdrop-blur border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%]">
-               <div className="p-3 border-b border-white/10 bg-white/5 flex justify-between items-center">
+             <div className="w-full max-w-[320px] bg-elevated/95 backdrop-blur border border-line rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80%] animate-jelly">
+               <div className="p-3 border-b border-line bg-white/5 flex justify-between items-center">
                  <div>
-                    <div className="text-[10px] text-emerald-400 font-bold">详细编辑模式</div>
-                    <div className="text-lg text-white font-medium">{selectedDateKey}</div>
+                    <div className="text-[10px] text-mint font-bold">详细编辑模式</div>
+                    <div className="text-lg text-ink font-medium">{selectedDateKey}</div>
                  </div>
-                 <button onClick={() => setSelectedDateKey(null)} className="p-1 hover:bg-white/10 rounded-full text-slate-200"><X size={16} /></button>
+                 <button onClick={() => setSelectedDateKey(null)} className="p-1 hover:bg-hover rounded-full text-ink"><X size={16} /></button>
                </div>
                <div ref={detailScrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-                 {getTasksForDate(selectedDateKey).map(t => (
-                   <div key={t.id} className="flex gap-2 items-center p-2 rounded hover:bg-white/5 group bg-black/20">
-                     <button onClick={() => handleToggleTodo(t.id)} className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${t.completed ? 'bg-emerald-600 border-transparent' : 'border-slate-200'}`}>
-                        {t.completed && <Check size={8} className="text-white"/>}
+                 {getTasksForDate(selectedDateKey).map((t, index) => (
+                   <div key={t.id} className="flex gap-2 items-center p-2 rounded hover:bg-white/5 group bg-black/20 animate-stagger" style={{ animationDelay: `${Math.min(index, 10) * 50}ms` }}>
+                     <button onClick={() => handleToggleTodo(t.id)} className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${t.completed ? 'bg-mint-deep border-transparent' : 'border-ink3'}`}>
+                        {t.completed && <Check size={8} className="text-mint-ink"/>}
                      </button>
                      
                      <div className="flex-1 min-w-0">
@@ -1257,12 +1331,12 @@ const fetchTodos = async () => {
                             onChange={(e) => setModalEditText(e.target.value)}
                             onBlur={finishModalEdit}
                             onKeyDown={(e) => e.key === 'Enter' && finishModalEdit()}
-                            className="w-full bg-black/50 text-xs text-white px-1 py-0.5 rounded outline-none border border-emerald-500/50"
+                            className="w-full bg-black/40 text-xs text-ink px-1 py-0.5 rounded outline-none border border-mint/50"
                          />
                        ) : (
                          <span 
                             onClick={() => startModalEdit(t)}
-                            className={`block text-xs break-all cursor-text ${t.completed ? 'text-slate-200 line-through' : 'text-slate-200'}`}
+                            className={`block text-xs break-all cursor-text ${t.completed ? 'text-ink line-through' : 'text-ink'}`}
                             title="点击编辑"
                          >
                             {t.text}
@@ -1270,13 +1344,13 @@ const fetchTodos = async () => {
                        )}
                      </div>
 
-                     <button onClick={() => handleDeleteTodo(t.id)} className="opacity-0 group-hover:opacity-100 text-slate-200 hover:text-red-400 flex-shrink-0"><Trash2 size={10}/></button>
+                     <button onClick={() => handleDeleteTodo(t.id)} className="opacity-0 group-hover:opacity-100 text-ink hover:text-danger flex-shrink-0"><Trash2 size={10}/></button>
                    </div>
                  ))}
                </div>
-               <div className="p-2 border-t border-white/10 bg-white/5 flex gap-2">
-                 <input autoFocus value={inputValue} onChange={e => setInputValue(e.target.value)} placeholder="添加..." className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1.5 text-xs text-white focus:border-emerald-500 outline-none" />
-                 <button onClick={() => { handleAddTodo(inputValue, selectedDateKey); setInputValue(''); }} disabled={!inputValue.trim()} className="bg-emerald-600 px-3 py-1.5 rounded text-white text-xs disabled:opacity-50">添加</button>
+               <div className="p-2 border-t border-line bg-white/5 flex gap-2">
+                 <input autoFocus value={inputValue} onChange={e => setInputValue(e.target.value)} placeholder="添加..." className="flex-1 bg-black/30 border border-line rounded px-2 py-1.5 text-xs text-ink focus:border-mint outline-none" />
+                 <button onClick={() => { handleAddTodo(inputValue, selectedDateKey); setInputValue(''); }} disabled={!inputValue.trim()} className="bg-mint-deep px-3 py-1.5 rounded-lg text-mint-ink font-semibold text-xs disabled:opacity-50">添加</button>
                </div>
              </div>
              <div className="absolute inset-0 -z-10" onClick={() => setSelectedDateKey(null)}></div>
@@ -1285,37 +1359,6 @@ const fetchTodos = async () => {
       </div>
 
       <Suspense fallback={null}>
-        {isHistoryOpen && (
-          <HistoryModal 
-            isOpen={isHistoryOpen} 
-            onClose={() => setIsHistoryOpen(false)}
-            todos={todos}
-            onToggleTodo={handleToggleTodo}
-            onDeleteTodo={handleDeleteTodo}
-          />
-        )}
-
-        {isSearchOpen && (
-          <SearchModal 
-            isOpen={isSearchOpen}
-            onClose={() => setIsSearchOpen(false)}
-            todos={todos}
-            onNavigate={(date) => {
-              setCurrentDate(date);
-              setIsSearchOpen(false);
-            }}
-          />
-        )}
-
-        {isDataToolsOpen && (
-          <DataToolsModal 
-            isOpen={isDataToolsOpen}
-            onClose={() => setIsDataToolsOpen(false)}
-            todos={todos}
-            onImport={handleBatchImport}
-          />
-        )}
-
         {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
       </Suspense>
     </div>

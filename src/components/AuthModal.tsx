@@ -66,21 +66,21 @@ export const AuthModal = ({ onClose }: { onClose: () => void }) => {
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-80 bg-[#1a1b1e] border border-white/10 rounded-xl p-6 relative shadow-2xl animate-in zoom-in-95 duration-200">
+      <div className="w-80 bg-elevated border border-line rounded-xl p-6 relative shadow-2xl animate-jelly">
         <button 
           onClick={onClose} 
-          className="absolute top-3 right-3 text-slate-400 hover:text-white transition-colors"
+          className="absolute top-3 right-3 text-ink3 hover:text-ink transition-colors"
         >
           <X size={16} />
         </button>
         
-        <h2 className="text-white text-lg font-bold mb-4">
+        <h2 className="text-ink text-lg font-bold mb-4">
           {isSignUp ? '注册同步账号' : '登录同步账号'}
         </h2>
         
         <form onSubmit={handleAuth} className="space-y-3">
           <input 
-            className="w-full bg-black/30 border border-white/10 rounded p-2 text-white text-sm outline-none focus:border-emerald-500 transition-colors" 
+            className="w-full bg-black/30 border border-line rounded p-2 text-ink text-sm outline-none focus:border-mint transition-colors" 
             type="email" 
             placeholder="邮箱" 
             value={email} 
@@ -89,7 +89,7 @@ export const AuthModal = ({ onClose }: { onClose: () => void }) => {
           />
           <input 
             ref={passwordRef} // 绑定 ref
-            className="w-full bg-black/30 border border-white/10 rounded p-2 text-white text-sm outline-none focus:border-emerald-500 transition-colors" 
+            className="w-full bg-black/30 border border-line rounded p-2 text-ink text-sm outline-none focus:border-mint transition-colors" 
             type="password" 
             placeholder="密码" 
             value={password} 
@@ -99,7 +99,7 @@ export const AuthModal = ({ onClose }: { onClose: () => void }) => {
           
           {isSignUp && (
             <input 
-              className="w-full bg-black/30 border border-white/10 rounded p-2 text-white text-sm outline-none focus:border-emerald-500 transition-colors animate-in slide-in-from-top-2 duration-200" 
+              className="w-full bg-black/30 border border-line rounded p-2 text-ink text-sm outline-none focus:border-mint transition-colors animate-in slide-in-from-top-2 duration-200" 
               type="password" 
               placeholder="确认密码" 
               value={confirmPassword} 
@@ -110,7 +110,7 @@ export const AuthModal = ({ onClose }: { onClose: () => void }) => {
 
           {/* 错误提示区域 */}
           {errorMsg && (
-            <div className="flex items-center gap-2 text-red-400 text-xs bg-red-400/10 p-2 rounded animate-in fade-in slide-in-from-top-1">
+            <div className="flex items-center gap-2 text-danger text-xs bg-danger/10 p-2 rounded animate-in fade-in slide-in-from-top-1">
               <AlertCircle size={14} className="flex-shrink-0" />
               <span>{errorMsg}</span>
             </div>
@@ -119,7 +119,7 @@ export const AuthModal = ({ onClose }: { onClose: () => void }) => {
           <button 
             type="submit"
             disabled={loading} 
-            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded p-2 text-sm font-bold transition-all active:scale-[0.98]"
+            className="w-full bg-mint-deep hover:bg-mint disabled:opacity-50 disabled:cursor-not-allowed text-mint-ink rounded-lg p-2 text-sm font-semibold transition-all active:scale-[0.98]"
           >
             {loading ? '处理中...' : isSignUp ? '立即注册' : '立即登录'}
           </button>
@@ -129,7 +129,7 @@ export const AuthModal = ({ onClose }: { onClose: () => void }) => {
           <button 
             type="button"
             onClick={() => setIsSignUp(!isSignUp)} 
-            className="text-xs text-slate-400 hover:text-emerald-400 underline transition-colors cursor-pointer select-none"
+            className="text-xs text-ink3 hover:text-mint underline transition-colors cursor-pointer select-none"
           >
             {isSignUp ? '已有账号？去登录' : '没有账号？去注册'}
           </button>

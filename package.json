@@ -5,15 +5,15 @@
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite --port 30122",
+    "dev": "vite --port 30122 --host 127.0.0.1",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "electron:start": "electron .",
-    "electron:dev": "set ELECTRON_START_URL=http://localhost:30122&& start npm run dev && electron .",
-    "electron:dev:mac": "ELECTRON_START_URL=http://localhost:30122 electron .",
-    "dev:desktop": "concurrently -n web,electron -c green,blue \"npm:dev\" \"wait-on http://localhost:30122 && cross-env ELECTRON_START_URL=http://localhost:30122 electron .\"",
+    "electron:dev": "set ELECTRON_START_URL=http://127.0.0.1:30122&& start npm run dev && electron .",
+    "electron:dev:mac": "ELECTRON_START_URL=http://127.0.0.1:30122 electron .",
+    "dev:desktop": "concurrently -n web,electron -c green,blue \"npm:dev\" \"wait-on http://127.0.0.1:30122 && cross-env ELECTRON_START_URL=http://127.0.0.1:30122 electron .\"",
     "electron:build": "npm run build && electron-builder --win nsis"
   },
   "devDependencies": {

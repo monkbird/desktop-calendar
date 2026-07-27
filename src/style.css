@@ -1,13 +1,72 @@
 @import "tailwindcss";
 
+/* ============ 设计令牌（2026-07-24 UI 美化） ============ */
+@theme {
+  --font-sans: "MiSans", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* 背景层级（低饱和蓝灰暗色） */
+  --color-base: #131418;
+  --color-card: #1c1e25;
+  --color-elevated: #22252e;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-hover: rgba(255, 255, 255, 0.12);
+
+  /* 文字三级（对比度 ≥ 4.5:1，基于 card 底色校验） */
+  --color-ink: #e9ebf1;
+  --color-ink2: #a6acbb;
+  --color-ink3: #868da0;
+
+  /* 点缀：柔化薄荷绿 */
+  --color-mint: #7ce3b1;
+  --color-mint-deep: #3ecf8e;
+  --color-mint-ink: #10231b;
+  --color-mint-dim: rgba(124, 227, 177, 0.14);
+
+  /* 语义色（柔化） */
+  --color-warn: #e8c468;
+  --color-danger: #f28b8b;
+  --color-rest: #7ea8f0;
+  --color-work: #ef7f7a;
+
+  /* 动效：果冻入场（弹窗）与逐条进入（列表项） */
+  --animate-jelly: jelly-in 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+  @keyframes jelly-in {
+    0% { transform: scale(0.85); opacity: 0; }
+    55% { transform: scale(1.03); opacity: 1; }
+    75% { transform: scale(0.98); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  --animate-stagger: stagger-in 0.18s ease-out both;
+  @keyframes stagger-in {
+    from { opacity: 1; transform: translateY(-3px); filter: blur(3px); }
+    to { opacity: 1; transform: translateY(0); filter: blur(0); }
+  }
+
+  /* 浮窗列表项：绕顶边从上一条下面翻下来（逐条延迟形成级联） */
+  --animate-toolbar-stagger: toolbar-stagger-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  @keyframes toolbar-stagger-in {
+    from {
+      opacity: 0;
+      transform: perspective(500px) rotateX(-70deg) translateY(-2px);
+      transform-origin: top center;
+    }
+    to {
+      opacity: 1;
+      transform: perspective(500px) rotateX(0deg) translateY(0);
+      transform-origin: top center;
+    }
+  }
+}
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  
+  color: var(--color-ink);
+
   /* 确保根背景透明 */
   background-color: transparent;
 
@@ -56,7 +115,7 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.22);
   border-radius: 4px;
   opacity: 0;
   transition: opacity 0.2s ease-out;
@@ -64,22 +123,4 @@ body {
 
 .custom-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
   opacity: 1;
-}
-
-/* --- Tooltip 子窗口事项逐条淡入下滑动画 --- */
-.tooltip-item-enter {
-  opacity: 0;
-  animation: tooltip-item-enter 0.15s ease-out forwards;
-  animation-delay: var(--enter-delay, 0ms);
-}
-
-@keyframes tooltip-item-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }

@@ -48,9 +48,11 @@
 - `src/main.tsx`：React 入口，挂载 `App`
 - `src/app.tsx`：主应用逻辑（窗口拖拽、缩放、待办逻辑、悬浮 Tooltip）
 - `src/components/CalendarCell.tsx`：日历单元格组件
-- `src/components/InteractiveTooltip.tsx`：悬浮交互面板组件
+- `src/components/ExternalTooltip.tsx`：悬停任务浮窗（独立 Electron 窗口，`tooltip.html`）
+- `src/components/MenuWindow.tsx`：侧贴菜单窗口（年/月选择器、搜索、历史归档、数据管理，`menu.html`）
 - `src/components/AuthModal.tsx`：登录/注册弹窗（Supabase）
-- `src/style.css`：全局样式，包含 `@import "tailwindcss"`
+- `src/theme.ts`：主题换肤预设与应用逻辑（覆盖 CSS 变量 + localStorage 持久化）
+- `src/style.css`：全局样式，包含 `@import "tailwindcss"` 与自定义动画定义
 - `postcss.config.mjs`：Tailwind v4 的 PostCSS 插件配置
 - `tsconfig.json`：TypeScript 配置，启用 `jsx: react-jsx`
 - `electron/main.js`：Electron 主进程（边缘吸附、托盘、窗口透明度）
@@ -106,6 +108,31 @@
   - 已登录时点击账号图标不再弹出登录/注册
   - 非当月日期格淡化程度降低（更易读）
   - 标题栏与月份栏水平内边距收窄，整体更紧凑
+
+## 2026-07-27 更新
+
+### 悬停任务浮窗：入场动效与闪烁修复
+- **修复"弹两次/闪一下"**：
+  - 浮窗可见时切换格子，主进程曾先用旧高度定位、渲染完再用新高度定位，窗口跳两次；现在可见状态下不预定位，只由 resize 回调一次性定位（`electron/main.js` 的 `show-tooltip-window`）
+  - 去掉显示时冗余的 `setAlwaysOnTop(true)`（窗口创建时已是 `alwaysOnTop`），消除 Windows 上的层级闪烁
+- **高度变化平滑过渡**：内容自然高度变化（切换日期、增删任务）时，卡片高度做 240ms CSS 过渡，`ResizeObserver` 逐帧上报、窗口即时跟随，内容与窗口始终同高
+- **关键坑：隐藏窗口下 `ResizeObserver` 不下发回调**（Chromium 暂停绘制）。因此数据到达时在 layout effect 里**同步**上报起始尺寸触发 `showInactive`，可见后再靠 RO 逐帧跟随，`transitionend` 兜底最终尺寸
+- **修复"任务出现两次"**：动画类只在 `animateReady` 时添加，导致任务先静态显示一遍、动画开始时再消失重播；现在未就绪时列表项 `opacity-0`
+- **修复"渐显状态残留导致淡出再淡入"**：`freshShow` 标记（主进程随数据下发）在窗口还隐藏时就重置入场状态，`tooltip-visible` 只负责启动动画
+- **最终入场时序**：弹窗直接显示 → 100ms 后任务逐条"翻下"（绕顶边 rotateX 翻转，逐条间隔 110ms，动画定义 `src/style.css` 的 `toolbar-stagger-in`）
+
+### 逐项翻入动效统一
+以下位置的列表项统一为翻转级联入场（`animate-toolbar-stagger`，110ms 间隔）：
+- 标题栏"桌面日历"工具下拉菜单（`src/app.tsx`）
+- 搜索结果列表（`src/components/SearchModal.tsx`）、历史归档列表（`src/components/HistoryModal.tsx`）
+- 侧贴菜单窗口切换面板时通过 `key={menu.mode}` 重挂载重播（`src/components/MenuWindow.tsx`，原整体果冻动画已移除）
+- 年/月选择器格子**不使用**逐项动画，直接整体显示
+
+### 主题换肤
+- 标题栏右侧新增主题按钮（调色板图标），下拉选择 5 套完整配色：曜石黑（默认）、深海蓝、墨玉绿、夜幕紫、米白
+- 实现：`src/theme.ts` 定义预设，通过覆盖 `@theme` 的全部 CSS 变量（背景三层、文字三级、线条、悬停色、强调色）实时换肤；选择持久化到 `localStorage`（`desktop-theme`）
+- 主窗口半透明底色跟随主题（`rgba(baseRGB, 用户透明度)`，替换原写死的黑色）
+- 浮窗/菜单窗口入口（`src/tooltip.tsx`、`src/menu.tsx`）通过 `initTheme()` + `storage` 事件监听同步换肤
 
 ## 常见问题
 - 运行 `npx tailwindcss init -p` 报错：Tailwind v4 已不再提供旧 CLI，该命令不可用。

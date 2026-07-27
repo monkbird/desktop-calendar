@@ -59,6 +59,15 @@ declare global {
       onTooltipAction: (cb: (action: { type: string; payload: any }) => void) => () => void;
       updateTooltipData: (data: any) => void;
       resizeTooltip: (size: { width: number; height: number }) => void;
+      onTooltipVisible: (cb: () => void) => () => void;
+      // --- 菜单窗口 ---
+      showMenu: (payload: { mode: string; data: any }) => void;
+      hideMenu: () => void;
+      updateMenuData: (payload: { mode: string; data: any }) => void;
+      resizeMenu: (size: { width: number; height: number }) => void;
+      onUpdateMenu: (cb: (payload: { mode: string; data: any }) => void) => () => void;
+      dispatchMenuAction: (action: { type: string; payload: any }) => void;
+      onMenuAction: (cb: (action: { type: string; payload: any }) => void) => () => void;
     };
   }
 }
