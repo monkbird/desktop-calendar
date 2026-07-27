@@ -266,7 +266,7 @@ export default function App() {
       const tasks = getTasksForDate(activeTooltipDate);
       window.desktopCalendar?.updateTooltipData?.({ dateKey: activeTooltipDate, tasks });
     }
-  }, [todos, activeTooltipDate]);
+  }, [todos, activeTooltipDate]); // tooltip 打开时推送数据，todos 变化时同步更新
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -851,14 +851,14 @@ const fetchTodos = async () => {
     tooltipTimerRef.current = setTimeout(() => {
       setActiveTooltipDate(dateKey);
 
+      // showTooltip 只负责定位窗口，数据由 useEffect [todos, activeTooltipDate] 统一推送
       window.desktopCalendar?.showTooltip?.({
         x: rect.right,
         y: rect.top,
         width: rect.width,
-        height: rect.height,
-        data: { dateKey, tasks }
+        height: rect.height
       });
-    }, 150);
+    }, 240);
   }, [isResizing, getTasksForDate]);
 
   const handleMouseLeaveAnywhere = useCallback(() => {

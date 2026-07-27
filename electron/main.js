@@ -44,6 +44,8 @@ const createTooltipWindow = () => {
     tooltipWindow.loadFile(path.join(__dirname, '..', 'dist', 'tooltip.html'))
   }
 
+  // 禁用后台节流，确保隐藏时 React 渲染不会被 Chromium 延迟
+  tooltipWindow.webContents.setBackgroundThrottling(false);
   tooltipWindow.on('closed', () => { tooltipWindow = null })
 }
 
@@ -186,6 +188,8 @@ ipcMain.on('set-resizable', (event, resizable) => {
 })
 
 let currentTargetRect = null;
+let isTooltipPendingShow = false;
+let tooltipShowTimeout = null;
 
 // 抽离定位逻辑，方便在 show 和 resize 时复用
 const updateTooltipPosition = (targetW, targetH) => {
@@ -240,22 +244,32 @@ const updateTooltipPosition = (targetW, targetH) => {
 };
 
 ipcMain.on('resize-tooltip-window', (event, { width, height }) => {
-  if (tooltipWindow) {
-    const bounds = tooltipWindow.getBounds();
-    // 只有当尺寸真的变化较大时才调整
-    if (Math.abs(bounds.height - height) > 2 || Math.abs(bounds.width - width) > 2) {
-      // [修复] Windows下如果 resizable: false，setSize 往往无法缩小窗口
-      // 必须先临时开启 resizable
-      const wasResizable = tooltipWindow.isResizable();
-      if (!wasResizable) tooltipWindow.setResizable(true);
+  if (!tooltipWindow) return;
 
-      tooltipWindow.setSize(Math.round(width), Math.round(height));
+  const bounds = tooltipWindow.getBounds();
+  // 只有当尺寸真的变化较大时才调整
+  if (Math.abs(bounds.height - height) > 2 || Math.abs(bounds.width - width) > 2) {
+    // [修复] Windows下如果 resizable: false，setSize 往往无法缩小窗口
+    // 必须先临时开启 resizable
+    const wasResizable = tooltipWindow.isResizable();
+    if (!wasResizable) tooltipWindow.setResizable(true);
 
-      if (!wasResizable) tooltipWindow.setResizable(false);
+    tooltipWindow.setSize(Math.round(width), Math.round(height));
 
-      // [核心修复] 将最新的 height 传给定位函数，防止 getBounds() 返回旧值导致定位计算错误
-      updateTooltipPosition(width, height);
+    if (!wasResizable) tooltipWindow.setResizable(false);
+  }
+
+  // [核心修复] 将最新的 height 传给定位函数，防止 getBounds() 返回旧值导致定位计算错误
+  updateTooltipPosition(width, height);
+
+  // [修复果冻效果] 首次显示时，等尺寸和位置都就绪后再一次性显示
+  if (isTooltipPendingShow) {
+    isTooltipPendingShow = false;
+    if (tooltipShowTimeout) {
+      clearTimeout(tooltipShowTimeout);
+      tooltipShowTimeout = null;
     }
+    tooltipWindow.showInactive();
   }
 });
 
@@ -271,18 +285,36 @@ ipcMain.on('show-tooltip-window', (event, { x, y, width, height, data }) => {
   // 保存当前的格子目标，供 resize 时复用
   currentTargetRect = { x, y, width, height };
 
-  // 1. 先发数据，让渲染进程开始计算高度
-  tooltipWindow.webContents.send('update-tooltip-data', data);
-  
-  // 2. 先执行一次定位（基于当前/旧的高度），确保窗口大概在正确位置出现
-  // 即使高度不对，也不会跳太远。等 resize 回调回来后会修正。
-  updateTooltipPosition();
-  
-  tooltipWindow.showInactive();
+  // [修复果冻效果] 窗口先隐藏，等渲染进程计算完真实高度并回调 resize 后，
+  // 再一次性设置好尺寸和位置，最后 showInactive，避免先显示再调整造成的抖动。
+  tooltipWindow.hide();
+  isTooltipPendingShow = true;
+  if (tooltipShowTimeout) {
+    clearTimeout(tooltipShowTimeout);
+    tooltipShowTimeout = null;
+  }
+
+  // [数据改由 updateTooltipData 通道推送] showTooltip 只负责定位，避免和 update-tooltip-data-only 重复推送
+  // 因此这里不再 send data，防止发送 undefined 导致 tooltip 误渲染 loading 状态
+
+  // 兜底：如果渲染进程异常没有回调 resize，3s 后仍按旧逻辑显示
+  tooltipShowTimeout = setTimeout(() => {
+    if (isTooltipPendingShow && tooltipWindow) {
+      isTooltipPendingShow = false;
+      tooltipShowTimeout = null;
+      updateTooltipPosition();
+      tooltipWindow.showInactive();
+    }
+  }, 3000);
 });
 
 ipcMain.on('hide-tooltip-window', () => {
   if (tooltipWindow) tooltipWindow.hide();
+  isTooltipPendingShow = false;
+  if (tooltipShowTimeout) {
+    clearTimeout(tooltipShowTimeout);
+    tooltipShowTimeout = null;
+  }
 });
 
 ipcMain.on('dispatch-tooltip-action', (event, action) => {

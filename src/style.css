@@ -65,3 +65,21 @@ body {
 .custom-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
   opacity: 1;
 }
+
+/* --- Tooltip 子窗口事项逐条淡入下滑动画 --- */
+.tooltip-item-enter {
+  opacity: 0;
+  animation: tooltip-item-enter 0.15s ease-out forwards;
+  animation-delay: var(--enter-delay, 0ms);
+}
+
+@keyframes tooltip-item-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

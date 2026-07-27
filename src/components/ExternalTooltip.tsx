@@ -220,10 +220,13 @@ export const ExternalTooltip = () => {
           {tasks.length === 0 ? (
             <div className="flex items-center justify-center text-slate-600 text-xs py-4">暂无事项</div>
           ) : (
-            tasks.map(task => (
+            // key={dateKey} 保证切换日期时列表重新挂载，触发逐条入场动画
+            <div key={dateKey} className="flex flex-col">
+              {tasks.map((task, index) => (
               <div 
                 key={task.id} 
-                className={`group flex items-center gap-2 p-1.5 hover:bg-white/5 rounded transition-colors ${draggedItem === task.id ? 'opacity-30' : ''}`}
+                className={`group flex items-center gap-2 p-1.5 hover:bg-white/5 rounded transition-colors tooltip-item-enter ${draggedItem === task.id ? '!opacity-30' : ''}`}
+                style={{ '--enter-delay': `${index * 20}ms` } as React.CSSProperties}
                 draggable={editingId !== task.id}
                 onDragStart={(e) => handleDragStart(e, task.id)}
                 onDragOver={(e) => handleDragOver(e, task.id)}
@@ -266,7 +269,8 @@ export const ExternalTooltip = () => {
                   <Trash2 size={12} />
                 </button>
               </div>
-            ))
+            ))}
+            </div>
           )}
         </div>
 
