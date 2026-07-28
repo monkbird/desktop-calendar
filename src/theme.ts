@@ -40,10 +40,10 @@ export const THEMES: ThemePreset[] = [
     id: 'abyss',
     name: '深海蓝',
     colors: {
-      base: '#0e1622', card: '#141f2e', elevated: '#1a2839',
+      base: '#12283f', card: '#183450', elevated: '#1f4060',
       line: 'rgba(255, 255, 255, 0.08)', hover: 'rgba(255, 255, 255, 0.12)',
       ink: '#e9eef5', ink2: '#a3b1c2', ink3: '#7f8ea1',
-      baseRGB: '14, 22, 34',
+      baseRGB: '18, 40, 63',
       mint: '#7cc6f0', mintDeep: '#3ea3e0', mintInk: '#0c1e2a', mintDim: 'rgba(124, 198, 240, 0.14)',
     },
   },
@@ -51,10 +51,10 @@ export const THEMES: ThemePreset[] = [
     id: 'jade',
     name: '墨玉绿',
     colors: {
-      base: '#0f1a15', card: '#15241d', elevated: '#1b2e25',
+      base: '#143327', card: '#1a4332', elevated: '#21523e',
       line: 'rgba(255, 255, 255, 0.08)', hover: 'rgba(255, 255, 255, 0.12)',
       ink: '#e9f1ec', ink2: '#a3b8ad', ink3: '#7f9489',
-      baseRGB: '15, 26, 21',
+      baseRGB: '20, 51, 39',
       mint: '#8fe0c0', mintDeep: '#45c695', mintInk: '#0e241b', mintDim: 'rgba(143, 224, 192, 0.14)',
     },
   },
@@ -62,10 +62,10 @@ export const THEMES: ThemePreset[] = [
     id: 'twilight',
     name: '夜幕紫',
     colors: {
-      base: '#161221', card: '#1e1930', elevated: '#262040',
+      base: '#251a3d', card: '#2f2149', elevated: '#3a2958',
       line: 'rgba(255, 255, 255, 0.08)', hover: 'rgba(255, 255, 255, 0.12)',
       ink: '#eeebf7', ink2: '#b0a9c7', ink3: '#8d85a6',
-      baseRGB: '22, 18, 33',
+      baseRGB: '37, 26, 61',
       mint: '#c8a9f5', mintDeep: '#a276e8', mintInk: '#1d1230', mintDim: 'rgba(200, 169, 245, 0.15)',
     },
   },
@@ -83,6 +83,53 @@ export const THEMES: ThemePreset[] = [
 ];
 
 const STORAGE_KEY = 'desktop-theme';
+
+// --- 颜色插值：用于米白主题透明态从米白平滑渐变到曜石黑，避免阈值跳变 ---
+const parseColor = (c: string): [number, number, number, number] => {
+  if (c.startsWith('#')) {
+    return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16), 1];
+  }
+  const m = c.match(/rgba?\(([^)]+)\)/);
+  if (m) {
+    const [r, g, b, a] = m[1].split(',').map(s => parseFloat(s));
+    return [r, g, b, Number.isNaN(a) ? 1 : a];
+  }
+  return [0, 0, 0, 1];
+};
+
+const mixColor = (from: string, to: string, t: number): string => {
+  const [r1, g1, b1, a1] = parseColor(from);
+  const [r2, g2, b2, a2] = parseColor(to);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  const a = a1 + (a2 - a1) * t;
+  return a >= 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${Math.round(a * 1000) / 1000})`;
+};
+
+// baseRGB 是 "r, g, b" 三元组，不是完整颜色，单独插值
+const mixRGBTriplet = (from: string, to: string, t: number): string => {
+  const p = (s: string) => s.split(',').map(x => parseFloat(x));
+  const a = p(from), b = p(to);
+  return a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(', ');
+};
+
+// 按 t（0=from，1=to）插值整套主题配色
+export const lerpThemeColors = (from: ThemePreset['colors'], to: ThemePreset['colors'], t: number): ThemePreset['colors'] => ({
+  base: mixColor(from.base, to.base, t),
+  card: mixColor(from.card, to.card, t),
+  elevated: mixColor(from.elevated, to.elevated, t),
+  line: mixColor(from.line, to.line, t),
+  hover: mixColor(from.hover, to.hover, t),
+  ink: mixColor(from.ink, to.ink, t),
+  ink2: mixColor(from.ink2, to.ink2, t),
+  ink3: mixColor(from.ink3, to.ink3, t),
+  baseRGB: mixRGBTriplet(from.baseRGB, to.baseRGB, t),
+  mint: mixColor(from.mint, to.mint, t),
+  mintDeep: mixColor(from.mintDeep, to.mintDeep, t),
+  mintInk: mixColor(from.mintInk, to.mintInk, t),
+  mintDim: mixColor(from.mintDim, to.mintDim, t),
+});
 
 export const getStoredThemeId = (): string => {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -107,6 +154,18 @@ export const applyTheme = (id: string) => {
   root.setProperty('--color-mint-deep', c.mintDeep);
   root.setProperty('--color-mint-ink', c.mintInk);
   root.setProperty('--color-mint-dim', c.mintDim);
+  // --theme-* 别名保存主题原始值，供 .theme-keep 在透明态覆盖下恢复下拉等组件配色
+  root.setProperty('--theme-card', c.card);
+  root.setProperty('--theme-elevated', c.elevated);
+  root.setProperty('--theme-line', c.line);
+  root.setProperty('--theme-hover', c.hover);
+  root.setProperty('--theme-ink', c.ink);
+  root.setProperty('--theme-ink2', c.ink2);
+  root.setProperty('--theme-ink3', c.ink3);
+  root.setProperty('--theme-mint', c.mint);
+  root.setProperty('--theme-mint-deep', c.mintDeep);
+  root.setProperty('--theme-mint-ink', c.mintInk);
+  root.setProperty('--theme-mint-dim', c.mintDim);
   localStorage.setItem(STORAGE_KEY, getTheme(id).id);
 };
 

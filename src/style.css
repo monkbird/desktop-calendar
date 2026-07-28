@@ -124,3 +124,54 @@ body {
 .custom-scrollbar.scrollbar-visible::-webkit-scrollbar-thumb {
   opacity: 1;
 }
+
+/* --- 高透明（低不透明度）状态下的文字可读性增强 --- */
+/* text-shadow 可继承，设在容器上即可全局生效 */
+.text-legible {
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 0, 0, 0.55);
+  /* 透明态下悬停衬底加强，避免糊在壁纸上 */
+  --color-hover: rgba(255, 255, 255, 0.22);
+}
+
+/* 日历格子悬停反馈：主题强调色衬底 + 描边，各主题/各透明度下都清晰可见 */
+.cal-cell:hover {
+  background-color: color-mix(in srgb, var(--color-mint) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-mint) 70%, transparent);
+}
+
+/* 当日/搜索闪烁描边：跟随主题强调色 */
+.ring-today {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-mint) 40%, transparent);
+}
+.ring-flash {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-mint) 90%, transparent);
+}
+
+/* 高透明状态下上下月日期不再额外降低不透明度（否则会糊在壁纸上） */
+.text-legible .opacity-75 {
+  opacity: 1;
+}
+
+/* 高透明状态下任务圆点加描边光晕（text-shadow 对非文字元素无效，用 box-shadow） */
+.text-legible .cal-dot {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+
+/* 透明态覆盖下的"保留原主题"区域（如下拉菜单）：恢复 --theme-* 原始值。
+   这些浮层本身不透明，无需可读性增强，一并还原字重与文字阴影 */
+.theme-keep {
+  font-weight: 400;
+  text-shadow: none;
+  --color-card: var(--theme-card);
+  --color-elevated: var(--theme-elevated);
+  --color-line: var(--theme-line);
+  --color-hover: var(--theme-hover);
+  --color-ink: var(--theme-ink);
+  --color-ink2: var(--theme-ink2);
+  --color-ink3: var(--theme-ink3);
+  --color-mint: var(--theme-mint);
+  --color-mint-deep: var(--theme-mint-deep);
+  --color-mint-ink: var(--theme-mint-ink);
+  --color-mint-dim: var(--theme-mint-dim);
+}

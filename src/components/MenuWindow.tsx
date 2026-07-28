@@ -150,8 +150,8 @@ export const MenuWindow = () => {
           </div>
           <input
             type="range"
-            min="0.1"
-            max="0.9"
+            min="0"
+            max="1"
             step="0.05"
             value={opacityValue}
             onChange={(e) => {

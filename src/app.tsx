@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useLayoutEffect, useMemo, lazy, Suspense, useCallback } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent, CSSProperties } from 'react';
 import {
   Calendar as CalendarIcon,
   RotateCcw, Lock, Unlock, Minus, Square,
@@ -8,7 +8,7 @@ import {
   ChevronDown, Sliders, Palette
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
-import { THEMES, applyTheme, getStoredThemeId, getTheme } from './theme';
+import { THEMES, applyTheme, getStoredThemeId, getTheme, lerpThemeColors } from './theme';
 import type { Todo, SyncAction } from './types';
 import { 
   CHINESE_NUMS, getDaysInMonth, getFirstDayOfMonth, formatDateKey, getDateInfo 
@@ -1125,13 +1125,37 @@ const fetchTodos = async () => {
       <div 
         ref={contentRef} 
         // [核心修改] 动态背景（跟随主题底色） + 锁定时移除所有框体效果(border, shadow, ring, blur)
-        style={{ backgroundColor: `rgba(${getTheme(themeId).colors.baseRGB}, ${bgOpacity})` }}
+        // 米白主题透明态：60% 以上保持纯米白（与其他主题界限对齐），60%→20% 连续渐变到曜石黑配色
+        style={(() => {
+          const t = themeId === 'paper' ? Math.min(1, Math.max(0, (0.6 - bgOpacity) / 0.4)) : 0;
+          // 渐变终点在曜石黑基础上把悬停衬底加强到 0.22，与 .text-legible 的透明态增强一致
+          const colors = t > 0 ? lerpThemeColors(getTheme('paper').colors, { ...getTheme('obsidian').colors, hover: 'rgba(255, 255, 255, 0.22)' }, t) : getTheme(themeId).colors;
+          return {
+            backgroundColor: `rgba(${colors.baseRGB}, ${bgOpacity})`,
+            ...(t > 0 ? {
+              '--color-card': colors.card,
+              '--color-elevated': colors.elevated,
+              '--color-line': colors.line,
+              '--color-hover': colors.hover,
+              '--color-ink': colors.ink,
+              '--color-ink2': colors.ink2,
+              '--color-ink3': colors.ink3,
+              '--color-mint': colors.mint,
+              '--color-mint-deep': colors.mintDeep,
+              '--color-mint-ink': colors.mintInk,
+              '--color-mint-dim': colors.mintDim,
+              fontWeight: t > 0.3 ? 500 : 400,
+              textShadow: `0 1px 2px rgba(0, 0, 0, ${0.9 * t}), 0 0 8px rgba(0, 0, 0, ${0.55 * t})`,
+            } : {}),
+          } as CSSProperties;
+        })()}
         className={`w-full h-fit flex flex-col transition-all duration-300 rounded-xl overflow-hidden
           ${isLocked 
             ? 'border-transparent shadow-none backdrop-blur-none ring-0' 
             : 'border border-line ring-1 ring-black/20 shadow-2xl backdrop-blur-xl'
           }
-          ${!isEffectivelyOpen ? 'rounded-b-xl' : ''} 
+          ${!isEffectivelyOpen ? 'rounded-b-xl' : ''}
+          ${bgOpacity < 0.6 ? 'text-legible' : ''}
         `}
       >
         {/* --- 标题栏 --- */}
@@ -1188,7 +1212,7 @@ const fetchTodos = async () => {
             <div
               // 阻止冒泡：否则点击项会冒泡到根节点 handleAppClick，刚打开的侧贴面板会被立刻关闭
               onClick={(e) => e.stopPropagation()}
-              className="absolute top-full left-2 mt-1 z-50 bg-elevated border border-line rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[130px] no-drag"
+              className="theme-keep absolute top-full left-2 mt-1 z-50 bg-elevated border border-line rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[130px] no-drag"
             >
                <button onClick={() => openMenuPanel('search')} className="flex items-center gap-2 px-2 py-1.5 text-xs text-ink2 hover:bg-hover hover:text-mint rounded text-left transition-colors animate-toolbar-stagger" style={{ animationDelay: '0ms' }}>
                  <Search size={14} /> 搜索事项
@@ -1226,7 +1250,7 @@ const fetchTodos = async () => {
           {isThemeMenuOpen && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute top-full right-2 mt-1 z-50 bg-elevated border border-line rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[120px] no-drag"
+              className="theme-keep absolute top-full right-2 mt-1 z-50 bg-elevated border border-line rounded-lg shadow-xl p-1.5 flex flex-col gap-1 min-w-[120px] no-drag"
             >
               {THEMES.map((t, i) => (
                 <button
@@ -1349,7 +1373,7 @@ const fetchTodos = async () => {
                  ))}
                </div>
                <div className="p-2 border-t border-line bg-white/5 flex gap-2">
-                 <input autoFocus value={inputValue} onChange={e => setInputValue(e.target.value)} placeholder="添加..." className="flex-1 bg-black/30 border border-line rounded px-2 py-1.5 text-xs text-ink focus:border-mint outline-none" />
+                 <input autoFocus value={inputValue} onChange={e => setInputValue(e.target.value)} placeholder="添加..." className="flex-1 bg-card border border-line rounded px-2 py-1.5 text-xs text-ink focus:border-mint outline-none" />
                  <button onClick={() => { handleAddTodo(inputValue, selectedDateKey); setInputValue(''); }} disabled={!inputValue.trim()} className="bg-mint-deep px-3 py-1.5 rounded-lg text-mint-ink font-semibold text-xs disabled:opacity-50">添加</button>
                </div>
              </div>

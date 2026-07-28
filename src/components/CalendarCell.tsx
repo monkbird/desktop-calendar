@@ -33,12 +33,12 @@ export const CalendarCell: FC<CalendarCellProps> = memo(({
   onDoubleClick,
   isOtherMonth = false,
 }) => {
-  // 闪烁高亮优先于“今天”的常驻描边，避免两个 shadow 工具类冲突
+  // 闪烁高亮优先于“今天”的常驻描边，避免两个 shadow 冲突；描边色跟随主题强调色（color-mix，见 style.css）
   const ringClass = isFlashed
-    ? 'bg-mint-dim shadow-[inset_0_0_0_2px_rgba(124,227,177,0.9)] animate-pulse'
+    ? 'bg-mint-dim ring-flash animate-pulse'
     : isToday
-      ? 'bg-mint-dim shadow-[inset_0_0_0_1px_rgba(124,227,177,0.4)]'
-      : 'hover:bg-white/[0.12] hover:shadow-[inset_0_0_0_1px_rgba(124,227,177,0.45)]';
+      ? 'bg-mint-dim ring-today'
+      : 'cal-cell';
 
   return (
     <div
@@ -98,14 +98,14 @@ export const CalendarCell: FC<CalendarCellProps> = memo(({
       {isMiniMode ? (
         <div className="flex gap-0.5 flex-wrap justify-center overflow-hidden h-1.5 w-full px-0.5">
           {tasks.slice(0, 4).map(t => (
-            <div key={t.id} className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${t.completed ? 'bg-ink3/60' : 'bg-warn'}`} />
+            <div key={t.id} className={`cal-dot w-1.5 h-1.5 rounded-full flex-shrink-0 ${t.completed ? 'bg-ink3/60' : 'bg-warn'}`} />
           ))}
         </div>
       ) : (
         <div className="flex-1 w-full flex flex-col gap-0.5 overflow-hidden min-h-0 pt-0.5">
           {tasks.slice(0, 5).map(todo => (
             <div key={todo.id} className="flex items-center gap-1 w-full flex-shrink-0">
-              <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${todo.completed ? 'bg-ink3/60' : 'bg-warn'}`}></div>
+              <div className={`cal-dot w-1.5 h-1.5 rounded-full flex-shrink-0 ${todo.completed ? 'bg-ink3/60' : 'bg-warn'}`}></div>
               <span className={`text-[10px] truncate min-w-0 ${todo.completed ? 'text-ink3 line-through' : 'text-ink2'}`}>{todo.text}</span>
             </div>
           ))}

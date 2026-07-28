@@ -337,7 +337,7 @@ export const ExternalTooltip = () => {
         <div className="p-2 border-t border-white/5 bg-white/[0.02] no-drag">
           <form onSubmit={handleAdd} className="flex items-center gap-2 relative">
             <input
-              className="flex-1 bg-black/30 border border-line rounded px-2 py-1.5 text-xs text-ink outline-none focus:border-mint transition-colors"
+              className="flex-1 bg-card border border-line rounded px-2 py-1.5 text-xs text-ink outline-none focus:border-mint transition-colors"
               placeholder="添加新事项..."
               value={localInput}
               onChange={e => setLocalInput(e.target.value)}
