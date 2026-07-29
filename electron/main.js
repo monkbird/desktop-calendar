@@ -20,6 +20,11 @@ let mainWindow
 let tooltipWindow
 let menuWindow
 let tray
+// tooltip / 菜单是按需创建的弹出窗口：首次使用时才创建（各占一个渲染进程，约 30~80MB），
+// 隐藏超过 POPUP_IDLE_TTL 后销毁，把内存还给系统；再次使用时重建
+let tooltipDestroyTimer = null
+let menuDestroyTimer = null
+const POPUP_IDLE_TTL = 30 * 1000
 let isSnapping = false;
 // 程序性 resize（卷帘动画等）引发的窗口位移不算用户拖动：此时间戳前的 move 去抖通知被屏蔽
 let suppressMoveNotifyUntil = 0;
@@ -92,6 +97,35 @@ const createMenuWindow = () => {
   menuWindow.on('closed', () => { menuWindow = null })
 }
 
+// --- 弹出窗口的懒创建与闲置销毁 ---
+const ensureTooltipWindow = () => {
+  if (tooltipDestroyTimer) { clearTimeout(tooltipDestroyTimer); tooltipDestroyTimer = null }
+  if (!tooltipWindow) createTooltipWindow()
+  return tooltipWindow
+}
+
+const ensureMenuWindow = () => {
+  if (menuDestroyTimer) { clearTimeout(menuDestroyTimer); menuDestroyTimer = null }
+  if (!menuWindow) createMenuWindow()
+  return menuWindow
+}
+
+const scheduleTooltipDestroy = () => {
+  if (tooltipDestroyTimer) clearTimeout(tooltipDestroyTimer)
+  tooltipDestroyTimer = setTimeout(() => {
+    tooltipDestroyTimer = null
+    if (tooltipWindow && !tooltipWindow.isVisible()) tooltipWindow.close()
+  }, POPUP_IDLE_TTL)
+}
+
+const scheduleMenuDestroy = () => {
+  if (menuDestroyTimer) clearTimeout(menuDestroyTimer)
+  menuDestroyTimer = setTimeout(() => {
+    menuDestroyTimer = null
+    if (menuWindow && !menuWindow.isVisible()) menuWindow.close()
+  }, POPUP_IDLE_TTL)
+}
+
 const createWindow = () => {
   const devUrl = getDevUrl()
   const isDev = !!devUrl
@@ -126,12 +160,10 @@ const createWindow = () => {
     mainWindow.loadFile(indexPath)
   }
 
-  createTooltipWindow();
-  createMenuWindow();
-
   mainWindow.on('move', () => {
-    if (tooltipWindow && tooltipWindow.isVisible()) tooltipWindow.hide();
-    if (menuWindow && menuWindow.isVisible()) menuWindow.hide();
+    // 主窗移动时弹窗失去意义：隐藏并转入闲置销毁倒计时
+    if (tooltipWindow && tooltipWindow.isVisible()) { tooltipWindow.hide(); scheduleTooltipDestroy(); }
+    if (menuWindow && menuWindow.isVisible()) { menuWindow.hide(); scheduleMenuDestroy(); }
     
     if (isSnapping) return;
     try {
@@ -397,30 +429,45 @@ ipcMain.on('update-tooltip-data-only', (event, data) => {
 });
 
 ipcMain.on('show-tooltip-window', (event, { x, y, width, height, data }) => {
-  if (!tooltipWindow || !mainWindow) return;
+  if (!mainWindow) return;
 
-  // 保存当前的格子目标，供 resize 时复用
-  currentTargetRect = { x, y, width, height };
+  // 懒创建：窗口可能刚被销毁重建，此时渲染进程尚未加载完成，
+  // 直接 send 会丢消息（渲染端永远收不到数据，pending 显示也不会兑现），
+  // 所以首次创建后等 did-finish-load 再执行显示逻辑
+  const win = ensureTooltipWindow();
+  const doShow = () => {
+    if (!tooltipWindow || !mainWindow) return;
 
-  // 1. 先发数据，让渲染进程开始计算高度。
-  // freshShow 标记本次是隐藏→显示的全新弹出，渲染端据此在窗口可见前重置入场动画状态
-  const freshShow = !tooltipWindow.isVisible();
-  tooltipWindow.webContents.send('update-tooltip-data', { ...data, freshShow });
+    // 保存当前的格子目标，供 resize 时复用
+    currentTargetRect = { x, y, width, height };
 
-  // 2. 仅在窗口隐藏时先按旧尺寸预定位（确保 show 时大概在正确位置）。
-  // 窗口已可见时不预定位——否则会用旧高度先跳一次，等 resize 回来用新高度再跳一次，
-  // 视觉上就是"弹了两下"。已可见时由 resize 回调一次性定位到新位置。
-  if (!tooltipWindow.isVisible()) {
-    updateTooltipPosition();
-    // 延迟显示：等渲染进程完成首次渲染并回传 resize-tooltip-window 后
-    // 才调用 showInactive，避免你看到「空窗→实窗」的双闪。
-    pendingTooltipShow = true;
+    // 1. 先发数据，让渲染进程开始计算高度。
+    // freshShow 标记本次是隐藏→显示的全新弹出，渲染端据此在窗口可见前重置入场动画状态
+    const freshShow = !tooltipWindow.isVisible();
+    tooltipWindow.webContents.send('update-tooltip-data', { ...data, freshShow });
+
+    // 2. 仅在窗口隐藏时先按旧尺寸预定位（确保 show 时大概在正确位置）。
+    // 窗口已可见时不预定位——否则会用旧高度先跳一次，等 resize 回来用新高度再跳一次，
+    // 视觉上就是"弹了两下"。已可见时由 resize 回调一次性定位到新位置。
+    if (!tooltipWindow.isVisible()) {
+      updateTooltipPosition();
+      // 延迟显示：等渲染进程完成首次渲染并回传 resize-tooltip-window 后
+      // 才调用 showInactive，避免你看到「空窗→实窗」的双闪。
+      pendingTooltipShow = true;
+    }
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', doShow);
+  } else {
+    doShow();
   }
 });
 
 ipcMain.on('hide-tooltip-window', () => {
   pendingTooltipShow = false;
-  if (tooltipWindow) tooltipWindow.hide();
+  if (!tooltipWindow) return;
+  tooltipWindow.hide();
+  scheduleTooltipDestroy();
 });
 
 ipcMain.on('dispatch-tooltip-action', (event, action) => {
@@ -477,31 +524,44 @@ const updateMenuPosition = (targetW, targetH) => {
 };
 
 ipcMain.on('show-menu-window', (event, { mode, data }) => {
-  if (!menuWindow || !mainWindow) return;
+  if (!mainWindow) return;
 
-  const winBounds = mainWindow.getBounds();
-  const { workArea } = screen.getDisplayMatching(winBounds);
+  // 懒创建：窗口可能刚重建，渲染进程未加载完时 send 会丢消息，等 did-finish-load 再执行
+  const win = ensureMenuWindow();
+  const doShow = () => {
+    if (!menuWindow || !mainWindow) return;
 
-  // 计算一次方向，本轮回合内高度变化也沿用
-  menuAnchor = {
-    side: (winBounds.x + winBounds.width / 2) > (workArea.x + workArea.width / 2) ? 'left' : 'right',
-    align: (winBounds.y + winBounds.height / 2) > (workArea.y + workArea.height / 2) ? 'bottom' : 'top'
+    const winBounds = mainWindow.getBounds();
+    const { workArea } = screen.getDisplayMatching(winBounds);
+
+    // 计算一次方向，本轮回合内高度变化也沿用
+    menuAnchor = {
+      side: (winBounds.x + winBounds.width / 2) > (workArea.x + workArea.width / 2) ? 'left' : 'right',
+      align: (winBounds.y + winBounds.height / 2) > (workArea.y + workArea.height / 2) ? 'bottom' : 'top'
+    };
+
+    // 先发数据让渲染进程开始计算尺寸
+    menuWindow.webContents.send('update-menu-data', { mode, data });
+
+    updateMenuPosition();
+
+    // 延迟显示：等 resize-menu-window 回来再 showInactive（同 tooltip 机制）
+    if (!menuWindow.isVisible()) {
+      pendingMenuShow = true;
+    }
   };
-
-  // 先发数据让渲染进程开始计算尺寸
-  menuWindow.webContents.send('update-menu-data', { mode, data });
-
-  updateMenuPosition();
-
-  // 延迟显示：等 resize-menu-window 回来再 showInactive（同 tooltip 机制）
-  if (!menuWindow.isVisible()) {
-    pendingMenuShow = true;
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', doShow);
+  } else {
+    doShow();
   }
 });
 
 ipcMain.on('hide-menu-window', () => {
   pendingMenuShow = false;
-  if (menuWindow) menuWindow.hide();
+  if (!menuWindow) return;
+  menuWindow.hide();
+  scheduleMenuDestroy();
 });
 
 ipcMain.on('update-menu-data-only', (event, payload) => {
