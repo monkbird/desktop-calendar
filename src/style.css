@@ -80,7 +80,7 @@ body {
   margin: 0;
   display: flex;
   place-items: start; /* 从左上角开始布局 */
-  min-width: 320px;
+  /* 注意：不能设 min-width，否则卷起成 mini bar(~120px) 时布局仍按 320px 渲染，右边缘圆角会被裁掉 */
   min-height: 100vh;
   background-color: transparent; /* body 透明 */
   overflow: hidden; /* 防止滚动条 */

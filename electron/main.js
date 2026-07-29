@@ -21,6 +21,8 @@ let tooltipWindow
 let menuWindow
 let tray
 let isSnapping = false;
+// 程序性 resize（卷帘动画等）引发的窗口位移不算用户拖动：此时间戳前的 move 去抖通知被屏蔽
+let suppressMoveNotifyUntil = 0;
 
 const getDevUrl = () => {
   const url = process.env.ELECTRON_START_URL;
@@ -97,7 +99,7 @@ const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 800,
     height: 500,
-    minWidth: 200,
+    minWidth: 120, // 卷起后的 mini bar 为 120x32，不能比它大
     minHeight: 30,
     frame: false,
     transparent: true,
@@ -157,6 +159,17 @@ const createWindow = () => {
     if (tooltipWindow) tooltipWindow.close();
     if (menuWindow) menuWindow.close();
   })
+
+  // 拖动结束判定（'moved' 在 app-region 原生拖动下不可靠）：
+  // 'move' 事件去抖 400ms，拖动停止后通知渲染进程，用于卷起状态拖动后恢复 mini bar
+  let moveDebounceTimer = null;
+  mainWindow.on('move', () => {
+    if (moveDebounceTimer) clearTimeout(moveDebounceTimer);
+    moveDebounceTimer = setTimeout(() => {
+      if (Date.now() < suppressMoveNotifyUntil) return; // 卷帘动画等程序性位移，忽略
+      mainWindow?.webContents.send('window-moved');
+    }, 400);
+  })
 }
 
 const toggleWindow = () => {
@@ -188,41 +201,78 @@ const createTray = () => {
   tray.on('click', toggleWindow)
 }
 
+// 应用窗口尺寸（含底部/右侧吸附锚定），resize-window 与 animate-window-bounds 共用
+const applyWindowSize = (win, width, height) => {
+  const bounds = win.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const workArea = display.workArea;
+
+  // 检查当前是否吸附在底部/右侧 (阈值 20px)
+  const isBottomAligned = Math.abs((bounds.y + bounds.height) - (workArea.y + workArea.height)) < 20;
+  const isRightAligned = Math.abs((bounds.x + bounds.width) - (workArea.x + workArea.width)) < 20;
+
+  const newWidth = parseInt(width);
+  const newHeight = parseInt(height);
+
+  if (isBottomAligned || isRightAligned) {
+    // 吸附边缘时调整坐标以保持吸附：底部吸附固定底边，右侧吸附固定右边（mini bar 收缩/恢复不悬空）
+    win.setBounds({
+      x: isRightAligned ? workArea.x + workArea.width - newWidth : bounds.x,
+      y: isBottomAligned ? workArea.y + workArea.height - newHeight : bounds.y,
+      width: newWidth,
+      height: newHeight
+    });
+  } else {
+    // 否则正常调整大小（默认向下/向右延伸）
+    win.setSize(newWidth, newHeight);
+  }
+};
+
 ipcMain.on('resize-window', (event, { width, height }) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) {
+    // 程序性 resize 可能伴随窗口位移（吸附时坐标随尺寸变化），屏蔽其触发的拖动结束通知
+    suppressMoveNotifyUntil = Date.now() + 800;
+
     // [核心修复] Windows下如果 resizable: false，setSize 往往无法缩小窗口
     // 解决方案：先临时允许调整大小，设置完后再恢复原状
     const wasResizable = win.isResizable();
     if (!wasResizable) win.setResizable(true);
-    
-    const bounds = win.getBounds();
-    const display = screen.getDisplayMatching(bounds);
-    const workArea = display.workArea;
-    const workAreaBottom = workArea.y + workArea.height;
 
-    // 检查当前是否吸附在底部 (阈值 20px)
-    const isBottomAligned = Math.abs((bounds.y + bounds.height) - workAreaBottom) < 20;
-    
-    const newWidth = parseInt(width);
-    const newHeight = parseInt(height);
+    applyWindowSize(win, width, height);
 
-    if (isBottomAligned) {
-      // 如果当前是底部吸附，调整 Y 坐标以保持底部吸附
-      const newY = workAreaBottom - newHeight;
-      win.setBounds({
-        x: bounds.x,
-        y: newY,
-        width: newWidth,
-        height: newHeight
-      });
-    } else {
-      // 否则正常调整大小（默认向下/向右延伸）
-      win.setSize(newWidth, newHeight);
-    }
-    
     if (!wasResizable) win.setResizable(false);
   }
+});
+
+// 窗口尺寸动画：在主进程跑定时器逐帧 setBounds，避免渲染进程 rAF + 逐帧 IPC 造成的抖动
+let boundsAnimTimer = null;
+ipcMain.on('animate-window-bounds', (event, { width, height, duration }) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  if (boundsAnimTimer) { clearInterval(boundsAnimTimer); boundsAnimTimer = null; }
+  suppressMoveNotifyUntil = Date.now() + (duration || 300) + 500;
+
+  const wasResizable = win.isResizable();
+  if (!wasResizable) win.setResizable(true);
+
+  const start = win.getBounds();
+  const t0 = Date.now();
+  const D = duration || 300;
+  boundsAnimTimer = setInterval(() => {
+    const p = Math.min(1, (Date.now() - t0) / D);
+    // easeInOutQuad
+    const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+    applyWindowSize(win,
+      Math.round(start.width + (width - start.width) * e),
+      Math.round(start.height + (height - start.height) * e)
+    );
+    if (p >= 1) {
+      clearInterval(boundsAnimTimer);
+      boundsAnimTimer = null;
+      if (!wasResizable) win.setResizable(false);
+    }
+  }, 16);
 });
 
 ipcMain.on('set-resizable', (event, resizable) => {
@@ -230,6 +280,26 @@ ipcMain.on('set-resizable', (event, resizable) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (win) win.setResizable(resizable)
 })
+
+// 光标是否在当前窗口内（拖拽空白区 mouse 事件不可达，mouseleave 会误报，用真实光标位置兜底）
+ipcMain.handle('is-cursor-inside-window', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return false;
+  const p = screen.getCursorScreenPoint();
+  const b = win.getBounds();
+  return p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+});
+
+// 窗口是否吸附在屏幕底部或右侧（此时展开时标题栏会离开光标，整条 bar 都可触发展开）
+ipcMain.handle('is-bottom-snapped', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return false;
+  const bounds = win.getBounds();
+  const { workArea } = screen.getDisplayMatching(bounds);
+  const bottom = Math.abs((bounds.y + bounds.height) - (workArea.y + workArea.height)) < 20;
+  const right = Math.abs((bounds.x + bounds.width) - (workArea.x + workArea.width)) < 20;
+  return bottom || right;
+});
 
 let currentTargetRect = null;
 let pendingTooltipShow = false; // 等待渲染进程完成首次渲染后再显示窗口

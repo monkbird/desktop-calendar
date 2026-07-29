@@ -50,6 +50,7 @@ declare global {
       // ... 保持原有内容不变 ...
       version: string;
       resizeWindow: (size: { width: number; height: number }) => void;
+      animateWindowBounds: (size: { width: number; height: number; duration?: number }) => void;
       setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;
       setResizable: (resizable: boolean) => void;
       showTooltip: (payload: { x: number; y: number; width: number; height: number; data: any }) => void;
@@ -68,6 +69,9 @@ declare global {
       onUpdateMenu: (cb: (payload: { mode: string; data: any }) => void) => () => void;
       dispatchMenuAction: (action: { type: string; payload: any }) => void;
       onMenuAction: (cb: (action: { type: string; payload: any }) => void) => () => void;
+      onWindowMoved: (cb: () => void) => () => void;
+      isCursorInside: () => Promise<boolean>;
+      isBottomSnapped: () => Promise<boolean>;
     };
   }
 }

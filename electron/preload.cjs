@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('desktopCalendar', {
   version: '1.0.0',
   // --- 主窗口控制 ---
   resizeWindow: (size) => ipcRenderer.send('resize-window', size),
+  // 窗口尺寸动画（主进程逐帧驱动，比渲染进程逐帧 IPC 平滑）
+  animateWindowBounds: (size) => ipcRenderer.send('animate-window-bounds', size),
   setResizable: (resizable) => ipcRenderer.send('set-resizable', resizable),
   
   // --- Tooltip 通信 ---
@@ -53,5 +55,16 @@ contextBridge.exposeInMainWorld('desktopCalendar', {
     const cb = (_event, value) => callback(value)
     ipcRenderer.on('menu-action-received', cb)
     return () => ipcRenderer.removeListener('menu-action-received', cb)
-  }
+  },
+
+  // 主窗口拖动结束（Windows 'moved' 事件）
+  onWindowMoved: (callback) => {
+    const cb = () => callback()
+    ipcRenderer.on('window-moved', cb)
+    return () => ipcRenderer.removeListener('window-moved', cb)
+  },
+
+  // 光标是否在窗口内 / 窗口是否吸附底部
+  isCursorInside: () => ipcRenderer.invoke('is-cursor-inside-window'),
+  isBottomSnapped: () => ipcRenderer.invoke('is-bottom-snapped')
 })

@@ -177,6 +177,8 @@ export default function App() {
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   // 主题色选择下拉
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  // 透明度调节下拉（窗口内，不再使用侧贴菜单窗口）
+  const [isOpacityMenuOpen, setIsOpacityMenuOpen] = useState(false);
   const [themeId, setThemeId] = useState(getStoredThemeId);
   // 侧贴菜单弹窗（选择器 + 数据面板），同一时间只开一个
   const [activeMenu, setActiveMenu] = useState<'year' | 'month' | 'opacity' | 'search' | 'history' | 'datatools' | null>(null);
@@ -190,6 +192,8 @@ export default function App() {
   // 搜索/历史归档/数据管理已迁移到侧贴菜单窗口（activeMenu），不再使用窗口内弹窗状态
 
   const contentRef = useRef<HTMLDivElement>(null);
+  // 主体内容内层（卷帘动画的 grid item）：测量完整内容高度用 scrollHeight，不受 grid-rows 过渡影响
+  const bodyRef = useRef<HTMLDivElement>(null);
   const detailScrollRef = useRef<HTMLDivElement | null>(null);
 
   // 鼠标追踪与延时收起 Ref
@@ -197,6 +201,18 @@ export default function App() {
   const isMouseInsideRef = useRef(false);
   // [新增] Tooltip 防抖定时器，减少 IPC 通信频率，优化内存和 CPU
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 卷帘动效：窗口当前实际宽高（动画目标值）
+  const winHeightRef = useRef<number | null>(null);
+  const winWidthRef = useRef<number | null>(null);
+  // 展开状态的完整窗口尺寸（收起期间不更新，供恢复 bar 宽度用）
+  const expandedSizeRef = useRef({ width: 800, height: 550 });
+  // 悬停展开的两段动效定时器（先恢复 bar 宽度，再卷帘展开）
+  const barTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 是否为 mini bar 状态（宽度已收缩）：此状态下隐藏标题栏右侧图标组，保证右边缘是圆角而非图标截断
+  const [isMiniBar, setIsMiniBar] = useState(false);
+  // isEffectivelyOpen 的 ref 镜像，供 resize 事件回调判断是否记录完整尺寸
+  const isOpenRef = useRef(true);
 
   // Auth 状态
   const [session, setSession] = useState<Session | null>(null);
@@ -245,10 +261,11 @@ export default function App() {
     return !!activeMenu ||
            isToolsMenuOpen ||
            isThemeMenuOpen ||
+           isOpacityMenuOpen ||
            !!selectedDateKey ||
            showAuth ||
            !!activeTooltipDate;
-  }, [activeMenu, isToolsMenuOpen, isThemeMenuOpen, selectedDateKey, showAuth, activeTooltipDate]);
+  }, [activeMenu, isToolsMenuOpen, isThemeMenuOpen, isOpacityMenuOpen, selectedDateKey, showAuth, activeTooltipDate]);
 
   // 启动时应用存储的主题色
   useEffect(() => { applyTheme(themeId); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -457,6 +474,32 @@ const fetchTodos = async () => {
 
   const isEffectivelyOpen = !isCollapsed || isHoverExpanded || isAnyPopupOpen;
 
+  // 同步到 ref，供 resize 事件回调使用（收起期间不覆盖完整尺寸记录）
+  useEffect(() => { isOpenRef.current = isEffectivelyOpen; }, [isEffectivelyOpen]);
+
+  // 卷起状态被拖动后：恢复 mini bar（拖动会先触发悬停展开，拖动结束后收回）
+  useEffect(() => {
+    const removeListener = window.desktopCalendar?.onWindowMoved?.(() => {
+      if (!isCollapsed) return;
+      if (barTimerRef.current) {
+        clearTimeout(barTimerRef.current);
+        barTimerRef.current = null;
+      }
+      isMouseInsideRef.current = false;
+      setIsHoverExpanded(false);
+      // 拖动结束后光标可能仍在窗口内，React 不会再发 mouseenter：
+      // 延时补挂一次性 mousemove，光标一动就按重新进入处理
+      setTimeout(() => {
+        const rearm = () => {
+          window.removeEventListener('mousemove', rearm);
+          handleContainerMouseEnter();
+        };
+        window.addEventListener('mousemove', rearm);
+      }, 600);
+    });
+    return () => removeListener?.();
+  }, [isCollapsed]);
+
   // 关闭侧贴菜单弹窗（IPC 隐藏窗口 + 清本地状态）
   const closeMenu = () => {
     window.desktopCalendar?.hideMenu?.();
@@ -470,6 +513,7 @@ const fetchTodos = async () => {
     setActiveTooltipDate(null);
     setIsToolsMenuOpen(false);
     setIsThemeMenuOpen(false);
+    setIsOpacityMenuOpen(false);
     window.desktopCalendar?.showMenu?.({ mode, data: { todos } });
     setActiveMenu(mode);
   };
@@ -483,10 +527,25 @@ const fetchTodos = async () => {
       // 再次检查：如果有弹窗，或者鼠标又回来了，就不收起
       if (isAnyPopupOpen || isMouseInsideRef.current) return;
 
-      setIsHoverExpanded(false);
-      // 同时关闭可能还开着的菜单（双重保险）
-      setIsToolsMenuOpen(false);
-      closeMenu();
+      const doCollapse = () => {
+        setIsHoverExpanded(false);
+        // 同时关闭可能还开着的菜单（双重保险）
+        setIsToolsMenuOpen(false);
+        setIsThemeMenuOpen(false);
+        setIsOpacityMenuOpen(false);
+        closeMenu();
+      };
+
+      // 拖拽空白区 mouse 事件不可达，mouseleave 可能误报：以主进程真实光标位置为准
+      const isCursorInside = window.desktopCalendar?.isCursorInside;
+      if (!isCursorInside) { doCollapse(); return; }
+      isCursorInside().then(inside => {
+        if (inside) {
+          isMouseInsideRef.current = true; // 光标实际仍在窗口内（如停在拖拽空白区），不收起
+          return;
+        }
+        doCollapse();
+      }).catch(doCollapse);
     }, 200);
   };
 
@@ -512,8 +571,17 @@ const fetchTodos = async () => {
 
   useEffect(() => {
     setWinSize({ width: window.innerWidth, height: window.innerHeight });
+    winHeightRef.current = window.innerHeight;
+    winWidthRef.current = window.innerWidth;
+    expandedSizeRef.current = { width: window.innerWidth, height: window.innerHeight };
     const handleResize = () => {
       setWinSize({ width: window.innerWidth, height: window.innerHeight });
+      winHeightRef.current = window.innerHeight;
+      winWidthRef.current = window.innerWidth;
+      // 收起期间不更新完整尺寸；且只记录真正的展开尺寸，防止动画中间值污染恢复目标
+      if (isOpenRef.current && window.innerWidth > 200 && window.innerHeight > 100) {
+        expandedSizeRef.current = { width: window.innerWidth, height: window.innerHeight };
+      }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -683,6 +751,7 @@ const fetchTodos = async () => {
     setActiveTooltipDate(null);
     setIsToolsMenuOpen(false);
     setIsThemeMenuOpen(false);
+    setIsOpacityMenuOpen(false);
 
     const y = currentDate.getFullYear();
     const m = currentDate.getMonth();
@@ -928,18 +997,49 @@ const fetchTodos = async () => {
     isMouseInsideRef.current = true;
     cancelCollapse();
     
-    // 如果是卷起状态，移入即展开
-    if (isCollapsed) {
-      setIsHoverExpanded(true);
+    // 卷起状态移入 bar 任意位置：恢复 bar 宽度（不下拉）；卷帘展开由标题区悬停单独触发
+    if (isCollapsed && !isHoverExpanded) {
+      setIsMiniBar(false);
+      animateWindowSize({ width: expandedSizeRef.current.width, height: 34 });
+      // 底部/右侧吸附时展开方向会让标题栏离开光标：整条 bar 都可触发展开
+      window.desktopCalendar?.isBottomSnapped?.().then(snapped => {
+        if (!snapped) return;
+        if (barTimerRef.current) clearTimeout(barTimerRef.current);
+        barTimerRef.current = setTimeout(() => {
+          if (isMouseInsideRef.current) setIsHoverExpanded(true);
+        }, 500);
+      }).catch(() => {});
     }
   };
 
   const handleContainerMouseLeave = () => {
     isMouseInsideRef.current = false;
+    if (barTimerRef.current) {
+      clearTimeout(barTimerRef.current);
+      barTimerRef.current = null;
+    }
     
-    // 如果是卷起模式下触发的展开，才需要考虑收起
-    if (isCollapsed && isHoverExpanded) {
-      scheduleCollapse();
+    if (isCollapsed) {
+      if (isHoverExpanded) {
+        // 卷起模式下触发的展开，移出后延时收回
+        scheduleCollapse();
+      } else {
+        // 宽度恢复阶段就离开：收回 mini bar。
+        // 扫过拖拽空白区时 mouseleave 会误报，先确认光标真的离开窗口
+        const shrinkToMini = () => {
+          setIsMiniBar(true);
+          animateWindowSize({ width: 120, height: 34 });
+        };
+        const isCursorInside = window.desktopCalendar?.isCursorInside;
+        if (!isCursorInside) { shrinkToMini(); return; }
+        isCursorInside().then(inside => {
+          if (inside) {
+            isMouseInsideRef.current = true; // 光标仍在窗口内（只是路过拖拽区），不收缩
+            return;
+          }
+          shrinkToMini();
+        }).catch(shrinkToMini);
+      }
     }
   };
 
@@ -994,6 +1094,7 @@ const fetchTodos = async () => {
     setActiveTooltipDate(null);
     setIsToolsMenuOpen(false);
     setIsThemeMenuOpen(false);
+    setIsOpacityMenuOpen(false);
     closeMenu();
   };
 
@@ -1094,25 +1195,42 @@ const fetchTodos = async () => {
 
   const rowCount = calendarCells.length / 7;
 
-  // --- 窗口高度控制 Effect ---
+  // --- 卷帘/收缩动效：主进程逐帧驱动窗口宽高（单发请求，无逐帧 IPC），与内容区 grid-rows 动画同步 ---
+  const animateWindowSize = useCallback((target: { width: number; height: number }) => {
+    winWidthRef.current = target.width;
+    winHeightRef.current = target.height;
+    window.desktopCalendar?.animateWindowBounds?.({ ...target, duration: 300 }); // 与内容区 duration-300 一致
+  }, []);
+
+  useEffect(() => () => {
+    if (barTimerRef.current) clearTimeout(barTimerRef.current);
+  }, []);
+
+  // --- 窗口尺寸控制 Effect ---
   useLayoutEffect(() => {
-    // 1. 如果处于“完全卷起”状态
+    // 1. 完全卷起：与展开顺序相反——先卷帘收起高度，300ms 后若鼠标已离开 bar 才收缩为 mini bar
     if (!isEffectivelyOpen) {
-       window.desktopCalendar?.resizeWindow({ width: winSize.width, height: 32 });
+       animateWindowSize({ width: expandedSizeRef.current.width, height: 34 });
+       if (barTimerRef.current) clearTimeout(barTimerRef.current);
+       barTimerRef.current = setTimeout(() => {
+         if (isMouseInsideRef.current) return; // 鼠标仍在 bar 上：保持展开的 bar，不收缩
+         setIsMiniBar(true); // 撤下右侧图标组，右边缘恢复圆角
+         animateWindowSize({ width: 120, height: 34 });
+       }, 300);
        return;
     }
-    
-    // 2. 如果处于展开状态
-    if (contentRef.current) {
-       const actualContentHeight = contentRef.current.offsetHeight;
-       if (winSize.height < 100 || Math.abs(winSize.height - actualContentHeight) > 5) {
-          window.desktopCalendar?.resizeWindow({ 
-             width: winSize.width, 
-             height: actualContentHeight 
-          });
+
+    // 2. 展开状态：恢复完整宽度 + 目标高度（标题栏 32 + 主体完整高度 + 上下边框 2）
+    if (isMiniBar) setIsMiniBar(false);
+    if (bodyRef.current) {
+       const targetH = 32 + bodyRef.current.scrollHeight + 2;
+       const targetW = expandedSizeRef.current.width;
+       const curW = winWidthRef.current ?? targetW;
+       if (winSize.height < 100 || Math.abs(winSize.height - targetH) > 5 || Math.abs(curW - targetW) > 5) {
+          animateWindowSize({ width: targetW, height: targetH });
        }
     }
-  }, [rowCount, currentDate, isCollapsed, isHoverExpanded, isAnyPopupOpen]); 
+  }, [rowCount, currentDate, isCollapsed, isHoverExpanded, isAnyPopupOpen]);
   
   return (
     <div 
@@ -1154,46 +1272,56 @@ const fetchTodos = async () => {
             ? 'border-transparent shadow-none backdrop-blur-none ring-0' 
             : 'border border-line ring-1 ring-black/20 shadow-2xl backdrop-blur-xl'
           }
-          ${!isEffectivelyOpen ? 'rounded-b-xl' : ''}
           ${bgOpacity < 0.6 ? 'text-legible' : ''}
         `}
       >
         {/* --- 标题栏 --- */}
         <div 
-          onMouseEnter={() => { if (isCollapsed) setIsHoverExpanded(true); }}
           className={`h-8 flex items-center justify-between px-3 bg-white/5 flex-shrink-0 relative 
             ${isEffectivelyOpen ? 'border-b' : ''} 
             ${isLocked ? 'border-transparent' : 'border-line'}
           `}
         >
           {!isLocked && <div className="absolute inset-0 drag-region pointer-events-none" />}
-          {/* 左侧：图标 + 下拉菜单触发器 */}
-          <div className="flex items-center gap-1 min-w-0">
+          {/* 左侧：图标 + 下拉菜单触发器；卷起状态下只有悬停本区域才卷帘展开 */}
+          <div
+            className="flex items-center gap-1 min-w-0 flex-shrink-0"
+            onMouseEnter={() => {
+              if (!isCollapsed || isHoverExpanded) return;
+              if (barTimerRef.current) clearTimeout(barTimerRef.current);
+              // 宽度已恢复（从 bar 其他位置移入）时稍作停顿，否则等宽度恢复动画完成再停顿
+              const delay = Math.abs((winWidthRef.current ?? 0) - expandedSizeRef.current.width) < 2 ? 300 : 500;
+              barTimerRef.current = setTimeout(() => {
+                if (isMouseInsideRef.current) setIsHoverExpanded(true);
+              }, delay);
+            }}
+          >
             <CalendarIcon size={16} className="text-mint flex-shrink-0" />
             <button
-               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); setIsThemeMenuOpen(false); closeMenu(); }}
+               onClick={(e) => { e.stopPropagation(); setIsToolsMenuOpen(!isToolsMenuOpen); setIsThemeMenuOpen(false); setIsOpacityMenuOpen(false); closeMenu(); }}
                className="flex items-center gap-1 hover:bg-hover px-1.5 py-0.5 rounded transition-colors no-drag group"
             >
-               <span className="text-sm font-medium text-ink">桌面日历</span>
-               <ChevronDown size={12} className={`text-ink3 transition-transform duration-200 ${isToolsMenuOpen ? 'rotate-180 text-mint' : 'group-hover:text-mint'}`} />
+               <span className="text-sm font-medium text-ink whitespace-nowrap">桌面日历</span>
+               {!isMiniBar && <ChevronDown size={12} className={`text-ink3 transition-transform duration-200 ${isToolsMenuOpen ? 'rotate-180 text-mint' : 'group-hover:text-mint'}`} />}
             </button>
           </div>
 
-          {/* 右侧：功能按钮区 */}
+          {/* 右侧：功能按钮区（mini bar 状态下撤下，避免右边缘图标被截断） */}
+          {!isMiniBar && (
           <div className="flex items-center gap-1 no-drag flex-shrink-0">
              {/* 主题色按钮 */}
              <button
-               onClick={(e) => { e.stopPropagation(); setIsThemeMenuOpen(!isThemeMenuOpen); setIsToolsMenuOpen(false); closeMenu(); }}
+               onClick={(e) => { e.stopPropagation(); setIsThemeMenuOpen(!isThemeMenuOpen); setIsToolsMenuOpen(false); setIsOpacityMenuOpen(false); closeMenu(); }}
                className={`p-1.5 rounded hover:bg-hover transition-colors ${isThemeMenuOpen ? 'text-mint' : 'text-ink3 hover:text-ink'}`}
                title="主题颜色"
              >
                <Palette size={14} />
              </button>
 
-             {/* 透明度调节按钮 */}
+             {/* 透明度调节按钮（窗口内下拉，不再用侧贴菜单窗口） */}
              <button
-               onClick={(e) => { e.stopPropagation(); toggleMenu('opacity'); }}
-               className={`p-1.5 rounded hover:bg-hover transition-colors ${activeMenu === 'opacity' ? 'text-mint' : 'text-ink3 hover:text-ink'}`}
+               onClick={(e) => { e.stopPropagation(); setIsOpacityMenuOpen(!isOpacityMenuOpen); setIsThemeMenuOpen(false); setIsToolsMenuOpen(false); closeMenu(); }}
+               className={`p-1.5 rounded hover:bg-hover transition-colors ${isOpacityMenuOpen ? 'text-mint' : 'text-ink3 hover:text-ink'}`}
                title="调节透明度"
              >
                <Sliders size={14} />
@@ -1206,6 +1334,7 @@ const fetchTodos = async () => {
                {isCollapsed ? <Square size={14} /> : <Minus size={14} />}
              </button>
           </div>
+          )}
 
           {/* --- 下拉菜单（窗口内，保持旧样式） --- */}
           {isToolsMenuOpen && (
@@ -1270,10 +1399,33 @@ const fetchTodos = async () => {
             </div>
           )}
 
+          {/* --- 透明度调节下拉（窗口内） --- */}
+          {isOpacityMenuOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="theme-keep absolute top-full right-2 mt-1 z-50 bg-elevated border border-line rounded-lg shadow-xl p-2 flex flex-col gap-1 w-40 no-drag animate-toolbar-stagger"
+            >
+              <div className="flex justify-between text-[10px] text-ink3 mb-1">
+                <span>透明度</span>
+                <span className="tabular-nums">{Math.round(bgOpacity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={bgOpacity}
+                onChange={(e) => setBgOpacity(parseFloat(e.target.value))}
+                className="w-full h-1 bg-white/15 rounded-lg appearance-none cursor-pointer accent-mint"
+              />
+            </div>
+          )}
+
         </div>
 
-        {/* --- 主体内容 --- */}
-        <div className={`flex-1 flex flex-col min-h-0 relative transition-opacity duration-200 ${isEffectivelyOpen ? 'opacity-100' : 'opacity-0 pointer-events-none h-0'}`}>
+        {/* --- 主体内容（卷帘动效：grid-rows 1fr→0fr 与 OS 窗口高度动画同步） --- */}
+        <div className={`flex-1 grid min-h-0 transition-all duration-300 ease-in-out ${isEffectivelyOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}>
+        <div ref={bodyRef} className="flex flex-col min-h-0 overflow-hidden relative">
           <div className="flex items-center justify-between px-2 py-0.1 bg-white/5 flex-shrink-0">
              {/* [修改] 网格选择器布局 */}
              <div className="flex items-center gap-0.5 text-xl font-medium text-ink tabular-nums relative">
@@ -1312,7 +1464,8 @@ const fetchTodos = async () => {
             ))}
           </div>
 
-          <div className="w-full grid grid-cols-7 auto-rows-fr overflow-hidden bg-transparent">
+          {/* flex-shrink-0：卷起测量 scrollHeight 时网格不能被 flex 压缩，否则展开高度算不全 */}
+          <div className="w-full grid grid-cols-7 auto-rows-fr overflow-hidden bg-transparent flex-shrink-0">
             {calendarCells}
           </div>
 
@@ -1326,6 +1479,7 @@ const fetchTodos = async () => {
               </svg>
             </div>
           )}
+        </div>
         </div>
 
         {/* --- 双击详情弹窗 --- */}
